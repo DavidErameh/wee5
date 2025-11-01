@@ -1,60 +1,51 @@
-import { Button } from "@whop/react/components";
-import { headers } from "next/headers";
-import Link from "next/link";
-import { whopsdk } from "@/lib/whop-sdk";
+import { RankCard } from '@/components/RankCard';
+import { LeaderboardTable } from '@/components/LeaderboardTable';
+import { Box, Flex, Heading } from 'frosted-ui';
+import { supabaseAdmin } from '@/lib/db';
+import { UpgradeButton } from '@/components/UpgradeButton';
+import { WebSocketProvider } from '@/components/WebSocketProvider';
 
 export default async function ExperiencePage({
-	params,
+  params,
+  searchParams,
 }: {
-	params: Promise<{ experienceId: string }>;
+  params: { experienceId: string };
+  searchParams: { userId?: string };
 }) {
-	const { experienceId } = await params;
-	// Ensure the user is logged in on whop.
-	const { userId } = await whopsdk.verifyUserToken(await headers());
+  const { experienceId } = params;
+  const userId = searchParams.userId;
 
-	// Fetch the neccessary data we want from whop.
-	const [experience, user, access] = await Promise.all([
-		whopsdk.experiences.retrieve(experienceId),
-		whopsdk.users.retrieve(userId),
-		whopsdk.users.checkAccess(experienceId, { id: userId }),
-	]);
+  let userTier = 'free';
+  if (userId) {
+    const { data: user } = await supabaseAdmin
+      .from('users')
+      .select('tier')
+      .eq('user_id', userId)
+      .single();
+    if (user) {
+      userTier = user.tier;
+    }
+  }
 
-	const displayName = user.name || `@${user.username}`;
+  return (
+    <Box className="min-h-screen bg-gray-2 p-6">
+      {userId && <WebSocketProvider userId={userId} />}
+      <Flex justify="between" align="center" className="mb-6">
+        <Heading size="8">WEE5 Leaderboard</Heading>
+        {userTier === 'free' && <UpgradeButton />}
+      </Flex>
 
-	return (
-		<div className="flex flex-col p-8 gap-4">
-			<div className="flex justify-between items-center gap-4">
-				<h1 className="text-9">
-					Hi <strong>{displayName}</strong>!
-				</h1>
-				<Link href="https://docs.whop.com/apps" target="_blank">
-					<Button variant="classic" className="w-full" size="3">
-						Developer Docs
-					</Button>
-				</Link>
-			</div>
+      {userId && (
+        <Box className="mb-8">
+          <Heading size="6" className="mb-4">Your Rank</Heading>
+          <RankCard userId={userId} experienceId={experienceId} />
+        </Box>
+      )}
 
-			<p className="text-3 text-gray-10">
-				Welcome to you whop app! Replace this template with your own app. To
-				get you started, here's some helpful data you can fetch from whop.
-			</p>
-
-			<h3 className="text-6 font-bold">Experience data</h3>
-			<JsonViewer data={experience} />
-
-			<h3 className="text-6 font-bold">User data</h3>
-			<JsonViewer data={user} />
-
-			<h3 className="text-6 font-bold">Access data</h3>
-			<JsonViewer data={access} />
-		</div>
-	);
-}
-
-function JsonViewer({ data }: { data: any }) {
-	return (
-		<pre className="text-2 border border-gray-a4 rounded-lg p-4 bg-gray-a2 max-h-72 overflow-y-auto">
-			<code className="text-gray-10">{JSON.stringify(data, null, 2)}</code>
-		</pre>
-	);
+      <Box>
+        <Heading size="6" className="mb-4">Top Players</Heading>
+        <LeaderboardTable experienceId={experienceId} />
+      </Box>
+    </Box>
+  );
 }
