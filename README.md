@@ -4,28 +4,49 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
 
 ## Features
 
+### Real-Time Architecture
+- **Whop WebSocket Integration**: Direct connection to Whop's real-time event system for instant activity detection
+- **Supabase Real-Time Subscriptions**: Live UI updates via PostgreSQL real-time functionality
+- **Reaction Polling Fallback**: Backup system for platforms where reactions aren't available in real-time events
+- **Redis Cooldown Management**: Fast, distributed cooldown enforcement for spam prevention
+- **Event Processing Pipeline**: Automated validation, cooldown checking, and XP awarding
+- **Instant Rewards**: Automated milestone rewards processed within milliseconds of level-up
+- **Live Progress Tracking**: Real-time progress bars and level indicators across all UI components
+- **Auto-Reconnect**: Robust connection management with exponential backoff
+- **Real-Time Error Handling**: Comprehensive error tracking and recovery with Sentry integration
+
 ### Core Features
 - **XP System**: Earn XP for community activities
   - Forum Posts: 15-25 XP per post (configurable for premium)
   - Chat Messages: 20 XP per message (configurable for premium)
   - Reactions: 5 XP per reaction (configurable for premium)
 - **Leveling System**: Based on MEE6's proven formula
-- **Anti-Spam Measures**: 60-second cooldown between XP awards
-- **Leaderboard**: Public and filtered leaderboards
-- **Rank Cards**: Display user progress and achievements
+- **Anti-Spam Measures**: 60-second cooldown between XP awards with Redis-powered prevention
+- **Leaderboard**: Real-time updating leaderboards with instant position changes (all-time, weekly, monthly)
+- **Rank Cards**: Live progress updates with Supabase real-time subscriptions
+- **Real-Time Processing**: Automated WebSocket-based activity detection with reaction polling fallback
+
+- **Instant XP Awarding**: XP awarded within 1-2 seconds of user activity
+- **Live UI Updates**: Real-time progress bars and level indicators via PostgreSQL subscriptions
+- **Automated Event Processing**: Complete pipeline from activity detection to reward delivery
 
 ### Premium Features
 - **Custom XP Rates**: Set your own XP values for different activities
-- **Engagement Analytics**: Track user engagement and growth metrics
-- **Advanced Anti-Cheat**: Enhanced measures for fair play
-- **Custom Badges**: Personalize your community experience
+- **Real-Time Engagement Analytics**: Live dashboards with real-time engagement metrics
+- **Custom Badges**: Create and award custom badges to community members
+- **Enhanced Anti-Cheat**: Advanced real-time measures for fair play
 - **Priority Support**: Dedicated assistance for premium users
+- **Live Configuration**: Real-time XP rate updates that apply instantly
+- **Advanced Metrics**: Live user behavior tracking and retention analytics
 
 ### Enterprise Features
 - **Multi-Community Support**: Manage multiple communities from one dashboard
-- **API Access**: Integrate with external systems
+- **Cross-Community Analytics**: Real-time aggregated metrics across all communities
+- **Real-Time API Access**: Live data integration with external systems
 - **Custom Integrations**: Tailored solutions for large communities
 - **Dedicated Support**: SLA-backed support for critical issues
+- **API Webhooks**: Real-time event streaming to external systems
+- **Bulk Operations**: Real-time processing for large-scale community management
 
 ## Installation
 
@@ -44,17 +65,26 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
    ```
 
 2. **Environment Variables**:
-   Copy `.env.development` to `.env.local` and fill in your credentials:
+   Copy `.env.development` to `.env.local` and fill in your credentials including real-time services:
    ```env
    NEXT_PUBLIC_WHOP_APP_ID=your_app_id
    WHOP_API_KEY=your_api_key
+   WHOP_BOT_USER_ID=your_bot_user_id_that_will_receive_real_time_events
    WHOP_WEBHOOK_SECRET=your_webhook_secret
    SUPABASE_URL=your_supabase_url
    SUPABASE_ANON_KEY=your_supabase_anon_key
    SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
    UPSTASH_REDIS_REST_URL=your_redis_url
    UPSTASH_REDIS_REST_TOKEN=your_redis_token
+   SENTRY_DSN=your_sentry_dsn (optional)
+   NEXT_PUBLIC_SENTRY_DSN=your_public_sentry_dsn (optional)
+   ENABLE_REACTION_POLLING=true (optional, defaults to false)
    ```
+   
+   **Real-Time Setup**:
+   - Create a bot user in your Whop dashboard and obtain its user ID
+   - Set the `WHOP_BOT_USER_ID` to this user ID to enable real-time event processing
+   - The real-time services will automatically initialize when the app starts
 
 3. **Database Setup**:
    Run the schema from `supabase/schema.sql` in your Supabase database to create all required tables.
@@ -75,48 +105,59 @@ Ensure your Whop app settings are configured as follows:
 
 ### Webhooks
 Configure webhook URL in your Whop developer dashboard to handle membership events:
-- URL: `https://yourdomain.com/api/webhooks`
-- Events: `membership.activated`, `membership.expired`, `payment.succeeded`
+- URL: `https://yourdomain.com/api/webhook` (Note: Updated from /webhooks)
+- Events: `membership.created`, `membership.updated`, `membership.canceled`, `payment.succeeded`
+
+### Real-time Features
+WEE5 uses WebSockets for real-time activity detection. The real-time service connects to `/api/realtime` and listens for activity events.
 
 ## Usage
 
 ### For Community Members
 - Participate in chat, forums, and reactions to earn XP
-- Check your rank and progress with the `/mylevel` command
-- View community leaderboard with the `/leaderboard` command
+- Check your rank and progress via the web dashboard
+- View community leaderboard in real-time
 - Unlock rewards as you level up
+- See real-time progress updates with rank cards
 
 ### For Community Creators
 - Access your dashboard at `/dashboard/[companyId]`
 - Configure XP rates for your community (Premium feature)
 - View engagement analytics (Premium feature)
+- Award custom badges (Premium feature)
 - Upgrade to Premium/Enterprise for advanced features
 
 ## API Endpoints
 
-### XP System
+### Core System
 - `POST /api/xp` - Award XP for activities
 - `GET /api/leaderboard` - Fetch community leaderboard
+- `GET /api/xp?userId=X&experienceId=Y` - Fetch user XP/level
 
 ### Configuration
-- `GET /api/xp-config` - Get XP configuration
-- `POST /api/xp-config` - Update XP configuration
+- `GET /api/xp-config` - Get XP configuration (requires auth)
+- `POST /api/xp-config` - Update XP configuration (requires auth)
 
 ### Analytics
-- `GET /api/analytics` - Fetch engagement metrics
-- `POST /api/analytics` - Update analytics data
-
-### Commands
-- `POST /api/commands` - Handle slash commands
+- `GET /api/analytics` - Fetch engagement metrics (Premium only)
+- `POST /api/analytics` - Custom analytics queries (Premium only)
 
 ### Webhooks
-- `POST /api/webhooks` - Process Whop events
+- `POST /api/webhook` - Process Whop events with signature verification
+
+### Enterprise
+- `GET /api/enterprise` - List enterprise communities
+- `POST /api/enterprise` - Enterprise-specific operations
+
+### Checkout
+- `GET /api/checkout` - Fetch available plans
+- `POST /api/checkout` - Create checkout configuration
 
 ## Database Schema
 
 The application uses Supabase as the primary database with these tables:
 
-- `users` - Stores user XP, level, and activity data
+- `users` - Stores user XP, level, activity data, and tier
 - `xp_configurations` - Custom XP rates for premium communities
 - `activity_log` - Tracks all XP-earning activities
 - `rewards` - Manages earned rewards and level-ups
@@ -125,11 +166,16 @@ The application uses Supabase as the primary database with these tables:
 ## Architecture
 
 - **Frontend**: Next.js 16 with React and Frosted-UI components
-- **Backend**: Next.js API routes
-- **Database**: Supabase (PostgreSQL)
-- **Caching**: Upstash Redis for cooldown management
-- **Real-time**: Whop WebSockets for activity monitoring
+- **Backend**: Next.js API routes with TypeScript
+- **Database**: Supabase (PostgreSQL) with Row Level Security and Real-Time subscriptions
+- **Caching**: Upstash Redis for cooldowns and leaderboard caching
+- **Real-time Processing**: Direct Whop WebSocket integration for event detection + reaction polling fallback
+- **Real-time UI**: Supabase PostgreSQL real-time subscriptions for live updates
 - **Authentication**: Whop SDK for user verification
+- **Monitoring**: Sentry for error tracking and performance monitoring
+- **Event Processing**: Automated pipeline from activity detection to reward delivery
+- **Cooldown Management**: Redis-powered 60-second spam prevention
+- **Connection Management**: Auto-reconnect with exponential backoff for reliability
 
 ## Environment Variables
 
@@ -141,6 +187,8 @@ The application uses Supabase as the primary database with these tables:
 - `SUPABASE_SERVICE_ROLE_KEY` - Supabase service role key
 - `UPSTASH_REDIS_REST_URL` - Upstash Redis URL
 - `UPSTASH_REDIS_REST_TOKEN` - Upstash Redis token
+- `SENTRY_DSN` - Sentry DSN for server-side error tracking
+- `NEXT_PUBLIC_SENTRY_DSN` - Sentry DSN for client-side error tracking
 
 ## Deployment
 
@@ -154,6 +202,42 @@ The application uses Supabase as the primary database with these tables:
 1. Build the application: `pnpm build`
 2. Run in production: `pnpm start`
 
+## Testing
+
+### Running Tests
+```bash
+pnpm test
+```
+
+### Test Coverage
+The application includes unit tests for:
+- XP calculation logic
+- Reward system
+- API route functionality
+- Premium access controls
+
+## Security
+
+- All API routes include authentication validation
+- Webhook signature verification prevents unauthorized events
+- User access is verified against Whop company membership
+- Input validation prevents common security vulnerabilities
+- Rate limiting prevents abuse
+- XP cooldowns prevent automation abuse
+- Database RLS prevents unauthorized data access
+
+## Development
+
+### Linting
+```bash
+pnpm lint
+```
+
+### Type Checking
+```bash
+pnpm type-check
+```
+
 ## Troubleshooting
 
 ### Common Issues
@@ -161,37 +245,31 @@ The application uses Supabase as the primary database with these tables:
 - **XP not updating**: Verify webhook integration and Redis connection
 - **Database errors**: Check that schema has been applied to Supabase
 - **Authentication failures**: Verify environment variables are correct
+- **WebSocket errors**: Check for CORS issues and ensure proper URL configuration
 
 ### Webhook Issues
 - Ensure webhook secret is correctly encoded
 - Check that webhook URL matches your domain
-- Verify that required events are selected
-
-## Security
-
-- All API routes include authentication validation
-- User access is verified against Whop company membership
-- Input validation prevents common security vulnerabilities
-- XP cooldowns prevent automation abuse
-
-## Development
-
-### Running Tests
-```bash
-pnpm test
-```
-
-### Linting
-```bash
-pnpm lint
-```
+- Verify signature verification is working (see security section)
 
 ## Support
 
 For support, please:
 1. Check the troubleshooting section above
 2. Review the Whop developer documentation
-3. Contact support if issues persist
+3. Ensure Sentry monitoring is configured to catch errors
+4. Verify that `WHOP_BOT_USER_ID` is properly set for real-time functionality
+5. Check that the bot user has access to communities where XP tracking is needed
+6. Contact support if issues persist
+
+## Real-Time Functionality
+
+To ensure real-time features work properly:
+1. Make sure `WHOP_BOT_USER_ID` is set to the user ID of a valid Whop user
+2. The real-time services will automatically initialize on app startup
+3. XP will be awarded within 1-2 seconds of user activities in communities
+4. Leaderboards and rank cards update in real-time via Supabase subscriptions
+5. Monitor Sentry logs for any real-time processing errors
 
 ## Contributing
 

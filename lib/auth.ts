@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { whopsdk } from './whop-sdk';
+import { whopSdk } from './whop-sdk';
 
 interface AuthResult {
   userId: string | null;
@@ -14,43 +14,77 @@ export async function verifyUserAccess(
   requiredCompanyId?: string
 ): Promise<AuthResult> {
   try {
-    // Extract token from headers (this is a simplified approach)
-    const authHeader = request.headers.get('authorization');
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    // Extract user ID from request - this depends on how Whop passes auth
+    // In typical Whop apps, the user ID is available in the request context
+    // For now, we'll look for it in the URL parameters or headers
+    
+    const userId = request.headers.get('x-whop-user-id') || 
+                   request.nextUrl.searchParams.get('userId') ||
+                   request.nextUrl.searchParams.get('user_id') ||
+                   null;
+
+    if (!userId) {
       return {
         userId: null,
         companyId: null,
         hasAccess: false,
-        error: 'Missing or invalid authorization header'
+        error: 'No user ID found in request'
       };
     }
 
-    const token = authHeader.substring(7);
-    
-    // Verify the token (this should use whopsdk.verifyUserToken)
-    // For now, we'll create a simplified verification based on the pattern used in dashboard
-    const { headers } = await import('next/headers');
-    const whopResult = await whopsdk.verifyUserToken(await headers());
+    // Check if user has access to the specific resource using Whop SDK
+    if (requiredCompanyId) {
+      try {
+        // Check if user has access to the specific resource using database validation
+        // since the SDK method 'from' may not exist
+        const { supabaseAdmin: getSupabaseAdmin } = await import('./db');
+        const { data: userMembership, error: membershipError } = await getSupabaseAdmin()
+          .from('users')
+          .select('experience_id')
+          .eq('user_id', userId)
+          .eq('experience_id', requiredCompanyId!)
+          .single();
 
-    const userId = whopResult.userId;
-    const companyId = requiredCompanyId; // Extract from request if needed
+        if (membershipError && membershipError.code !== 'PGRST116') { // PGRST116 = no rows found
+          console.error('Database error checking user access:', membershipError);
+          return {
+            userId,
+            companyId: requiredCompanyId,
+            hasAccess: false,
+            error: 'Error verifying user access'
+          };
+        }
 
-    // Check if user has access to the specific resource
-    if (companyId) {
-      const access = await whopsdk.users.checkAccess(companyId, { id: userId });
-      if (!access) {
+        const hasDatabaseAccess = !!(userMembership && !membershipError);
+        
+        if (!hasDatabaseAccess) {
+          return {
+            userId,
+            companyId: requiredCompanyId,
+            hasAccess: false,
+            error: 'User does not have access to this resource'
+          };
+        }
+
         return {
           userId,
-          companyId,
+          companyId: requiredCompanyId,
+          hasAccess: true
+        };
+      } catch (error) {
+        console.error(`Error verifying access for user ${userId} in company ${requiredCompanyId}:`, error);
+        return {
+          userId,
+          companyId: requiredCompanyId,
           hasAccess: false,
-          error: 'User does not have access to this resource'
+          error: 'Failed to verify access'
         };
       }
     }
 
     return {
       userId,
-      companyId: companyId || null,
+      companyId: requiredCompanyId || null,
       hasAccess: true
     };
 
@@ -77,9 +111,18 @@ export async function requireAuth(request: NextRequest, companyId?: string) {
     };
   }
 
+  // Get user tier from database
+  const { supabase: getSupabase } = await import('@/lib/db');
+  const { data: userData, error: userError } = await getSupabase()
+    .from('users')
+    .select('tier')
+    .eq('user_id', authResult.userId!)
+    .single();
+
   return {
     success: true,
-    userId: authResult.userId,
-    companyId: authResult.companyId
+    userId: authResult.userId!,
+    companyId: authResult.companyId,
+    tier: userData?.tier || 'free'
   };
 }

@@ -1,147 +1,235 @@
-
 import { supabaseAdmin } from './db';
-import { redis, isOnCooldown, setCooldown } from './redis';
-import { getXpConfiguration } from './xpConfig';
+import { redis as getRedis, isOnCooldown, setCooldown } from './redis';
 
-// XP values per activity - defaults, will be overridden by configuration
-const DEFAULT_XP_VALUES = {
-  message: 20,
-  post: { min: 15, max: 25 }, // Range for posts
-  reaction: 5,
-};
+// XP values per activity type
+export const XP_VALUES = {
+  MESSAGE: 20,
+  POST_MIN: 15,
+  POST_MAX: 25,
+  REACTION: 5,
+} as const;
 
-// Award XP to a user
+export type ActivityType = 'message' | 'post' | 'reaction';
+
+interface AwardXPResult {
+  success: boolean;
+  xpAwarded?: number;
+  newTotalXp?: number;
+  leveledUp?: boolean;
+  oldLevel?: number;
+  newLevel?: number;
+  error?: string;
+}
+
+/**
+ * Award XP to a user for an activity
+ * CRITICAL: Includes cooldown check and level calculation
+ */
 export async function awardXP(
   userId: string,
   experienceId: string,
-  activityType: 'message' | 'post' | 'reaction'
-): Promise<{ success: boolean; xpAwarded?: number; leveledUp?: boolean; newLevel?: number }> {
-  
-  // Check cooldown
-  if (await isOnCooldown(userId)) {
-    return { success: false };
-  }
+  activityType: ActivityType
+): Promise<AwardXPResult> {
+  try {
+    // 1. Check cooldown (60 seconds)
+    if (await isOnCooldown(userId)) {
+      return { success: false, error: 'User is on cooldown' };
+    }
 
-  // Get XP configuration for this experience
-  const xpConfig = await getXpConfiguration(experienceId);
-  
-  // Calculate XP to award based on configuration
-  let xpToAward: number;
-  if (activityType === 'post') {
-    // Calculate random XP within the configured range
-    const min = xpConfig.post.min;
-    const max = xpConfig.post.max;
-    xpToAward = Math.floor(Math.random() * (max - min + 1)) + min;
-  } else if (activityType === 'message') {
-    xpToAward = xpConfig.message;
-  } else { // reaction
-    xpToAward = xpConfig.reaction;
-  }
-
-  // Get or create user
-  let { data: user, error } = await supabaseAdmin
-    .from('users')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('experience_id', experienceId)
-    .single();
-
-  if (error || !user) {
-    // Create new user with initial values
-    const activityField = `total_${activityType}s`;
-    const initialActivityCounters: any = {};
-    initialActivityCounters[activityField] = 1;
-    
-    const { data: newUser } = await supabaseAdmin
+    // 2. Get user record to check for tier
+    let { data: user, error: fetchError } = await supabaseAdmin()
       .from('users')
-      .insert({
-        user_id: userId,
-        experience_id: experienceId,
-        xp: xpToAward,
-        level: 1,
-        total_messages: 0,
-        total_posts: 0,
-        total_reactions: 0,
-        ...initialActivityCounters,
-        last_activity_at: new Date().toISOString(),
-      })
-      .select()
+      .select('xp, level, tier, total_messages, total_posts, total_reactions')
+      .eq('user_id', userId)
+      .eq('experience_id', experienceId)
+      .single();
+
+    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = no rows found
+      throw fetchError;
+    }
+
+    // 3. Calculate XP to award based on user tier (for premium users)
+    let xpToAward: number;
+    
+    // Check for custom XP configuration (premium feature)
+    const { data: xpConfig } = await supabaseAdmin()
+      .from('xp_configurations')
+      .select('*')
+      .eq('experience_id', experienceId)
       .single();
     
-    user = newUser;
-    
-    // Set cooldown for new user
-    await setCooldown(userId);
+    if (xpConfig) {
+      // Use custom XP rates for premium communities
+      if (activityType === 'message' && xpConfig.xp_per_message) {
+        xpToAward = xpConfig.xp_per_message;
+      } else if (activityType === 'post' && xpConfig.min_xp_per_post && xpConfig.max_xp_per_post) {
+        xpToAward = Math.floor(Math.random() * (xpConfig.max_xp_per_post - xpConfig.min_xp_per_post + 1)) + xpConfig.min_xp_per_post;
+      } else if (activityType === 'reaction' && xpConfig.xp_per_reaction) {
+        xpToAward = xpConfig.xp_per_reaction;
+      } else {
+        // Fallback to default if specific config not set
+        xpToAward = activityType === 'post' 
+          ? Math.floor(Math.random() * (XP_VALUES.POST_MAX - XP_VALUES.POST_MIN + 1)) + XP_VALUES.POST_MIN
+          : XP_VALUES[activityType.toUpperCase() as keyof typeof XP_VALUES];
+      }
+    } else {
+      // Use default XP values for free tier
+      if (activityType === 'post') {
+        xpToAward = Math.floor(Math.random() * (XP_VALUES.POST_MAX - XP_VALUES.POST_MIN + 1)) + XP_VALUES.POST_MIN;
+      } else {
+        xpToAward = XP_VALUES[activityType.toUpperCase() as keyof typeof XP_VALUES];
+      }
+    }
 
-    // Log activity for new user
-    await supabaseAdmin.from('activity_log').insert({
-      user_id: userId,
-      experience_id: experienceId,
-      activity_type: activityType,
-      xp_awarded: xpToAward,
-    });
+    let isNewUser = false;
+    if (!user) {
+      // Create new user with default values
+      const { data: newUser, error: createError } = await supabaseAdmin()
+        .from('users')
+        .insert({
+          user_id: userId,
+          experience_id: experienceId,
+          xp: xpToAward,
+          level: 1, // Starting at level 1 (database constraint: level >= 1)
+          tier: 'free', // Default tier
+          [`total_${activityType}s`]: 1,
+        })
+        .select()
+        .single();
 
-    return {
-      success: true,
-      xpAwarded: xpToAward,
-      leveledUp: false, // New users don't level up immediately
-      newLevel: undefined,
-    };
-  } else {
-    // Update existing user
-    const newXp = user.xp + xpToAward;
-    const currentLevel = user.level;
-    const newLevel = calculateLevel(newXp);
-    const leveledUp = newLevel > currentLevel;
+      if (createError) throw createError;
+      
+      user = newUser;
+      isNewUser = true;
+    } else {
+      // 4. Update existing user
+      const newXp = user.xp + xpToAward;
+      const oldLevel = user.level;
+      const newLevel = calculateLevel(newXp);
+      const leveledUp = newLevel > oldLevel;
 
-    // Increment activity counter
-    const activityField = `total_${activityType}s`;
-    
-    await supabaseAdmin
-      .from('users')
-      .update({
+      // Increment activity counter
+      const activityField = `total_${activityType}s` as keyof typeof user;
+      
+      // Define the update object with explicit typing
+      const updateData: any = {
         xp: newXp,
         level: newLevel,
-        [activityField]: (user[activityField] || 0) + 1,
         last_activity_at: new Date().toISOString(),
-      })
-      .eq('user_id', userId)
-      .eq('experience_id', experienceId);
+      };
+      
+      // Add the dynamic activity field with type-safe access
+      updateData[activityField] = (user[activityField] as number || 0) + 1;
+      
+      const { error: updateError } = await supabaseAdmin()
+        .from('users')
+        .update(updateData)
+        .eq('user_id', userId)
+        .eq('experience_id', experienceId);
 
-    // Set cooldown
+      if (updateError) throw updateError;
+
+      // 5. Log activity (optional)
+      try {
+        await supabaseAdmin().from('activity_log').insert({
+          user_id: userId,
+          experience_id: experienceId,
+          activity_type: activityType,
+          xp_awarded: xpToAward,
+        });
+      } catch (err) {
+        console.error('Failed to log activity:', err);
+      }
+
+      // 6. Set cooldown
+      await setCooldown(userId);
+
+      return {
+        success: true,
+        xpAwarded: xpToAward,
+        newTotalXp: newXp,
+        leveledUp,
+        oldLevel: leveledUp ? oldLevel : undefined,
+        newLevel: leveledUp ? newLevel : undefined,
+      };
+    }
+
+    // New user case
     await setCooldown(userId);
-
-    // Log activity 
-    await supabaseAdmin.from('activity_log').insert({
-      user_id: userId,
-      experience_id: experienceId,
-      activity_type: activityType,
-      xp_awarded: xpToAward,
-    });
 
     return {
       success: true,
       xpAwarded: xpToAward,
-      leveledUp,
-      newLevel: leveledUp ? newLevel : undefined,
+      newTotalXp: xpToAward,
+      leveledUp: false,
+    };
+
+  } catch (error) {
+    console.error('Error awarding XP:', error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error' 
     };
   }
 }
 
-// Calculate level from XP (MEE6 formula)
+/**
+ * Calculate level from total XP using MEE6 formula
+ * Formula: XP required for level N = 5 * (N^2) + 50 * N + 100
+ * CRITICAL: This must match the leveling progression
+ */
 export function calculateLevel(xp: number): number {
-  let level = 1;
-  let xpNeeded = xpForNextLevel(level);
-
-  while (xp >= xpNeeded) {
+  if (xp < 0) return 1; // Starting at level 1 (database constraint: level >= 1)
+  
+  let level = 1; // Start from level 1 (database constraint: level >= 1)
+  let cumulativeXp = 0;
+  
+  while (true) {
+    const xpForNext = xpForNextLevel(level);
+    if (cumulativeXp + xpForNext > xp) break;
+    cumulativeXp += xpForNext;
     level++;
-    xpNeeded += xpForNextLevel(level);
   }
-
+  
   return level;
 }
 
-// Calculate XP needed for next level
+/**
+ * Calculate cumulative XP needed to reach a specific level
+ */
+export function xpForLevel(level: number): number {
+  if (level <= 0) return 0;
+  
+  let totalXp = 0;
+  for (let l = 0; l < level; l++) {
+    totalXp += xpForNextLevel(l);
+  }
+  return totalXp;
+}
+
+/**
+ * Calculate XP needed for next level from current level
+ */
 export function xpForNextLevel(currentLevel: number): number {
   return 5 * (currentLevel ** 2) + 50 * currentLevel + 100;
+}
+
+/**
+ * Calculate progress percentage to next level
+ */
+export function calculateProgress(currentXp: number, currentLevel: number): {
+  current: number;
+  needed: number;
+  percentage: number;
+} {
+  const xpAtCurrent = xpForLevel(currentLevel);
+  const xpForNext = xpForNextLevel(currentLevel);
+  
+  const xpProgress = currentXp - xpAtCurrent;
+  
+  return {
+    current: xpProgress,
+    needed: xpForNext,
+    percentage: Math.min(100, Math.max(0, (xpProgress / xpForNext) * 100)),
+  };
 }

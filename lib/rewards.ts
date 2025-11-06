@@ -1,96 +1,205 @@
+/**
+ * Rewards System with Whop SDK Integration
+ * Per Documentation: 01_START HERE.MD, 03_CORE FEATURE.MD, 06_PAYMENTS.MD
+ * 
+ * Implements automated reward delivery using Whop SDK for:
+ * - Free membership days
+ * - Discount promo codes
+ * - Push notifications
+ */
 
-import { whopsdk } from './whop-sdk';
+import { addFreeDaysToMembership, createPromoCode, sendPushNotification, listUserMemberships } from './whop-sdk';
 import { supabaseAdmin } from './db';
+import * as Sentry from '@sentry/nextjs';
 
-// Reward tiers
-const REWARD_TIERS = {
+// Reward tier definitions per documentation
+export const REWARD_TIERS = {
   5: { type: 'free_days', value: 3 },
   10: { type: 'free_days', value: 7 },
   25: { type: 'free_days', value: 14 },
   50: { type: 'free_days', value: 30 },
-  100: { type: 'discount', value: '50%' },
-};
+  100: { type: 'discount', value: 50 },
+} as const;
 
-export async function handleLevelUp(userId: string, newLevel: number) {
-  // Check if this level has a reward
-  const reward = REWARD_TIERS[newLevel];
-  if (!reward) return;
+export type RewardTier = keyof typeof REWARD_TIERS;
 
-  // Check if reward already claimed
-  const { data: existingReward } = await supabaseAdmin
-    .from('rewards')
-    .select('*')
-    .eq('user_id', userId)
-    .eq('level_achieved', newLevel)
-    .single();
+interface HandleLevelUpResult {
+  success: boolean;
+  rewardGiven?: boolean;
+  rewardType?: string;
+  rewardValue?: string | number;
+  error?: string;
+}
 
-  if (existingReward) {
-    console.log('Reward already claimed for this level');
-    return;
-  }
-
+/**
+ * Handle level-up rewards with Whop SDK integration
+ * Awards free days or creates promo codes automatically
+ */
+export async function handleLevelUp(
+  userId: string,
+  experienceId: string,
+  newLevel: number
+): Promise<HandleLevelUpResult> {
   try {
-    // Get user's membership
-    const memberships = await whopsdk.memberships.list({
-      user_id: userId,
-      valid: true,
-    });
-
-    const membership = memberships.data[0];
-    if (!membership) {
-      console.error('No valid membership found for user');
-      return;
+    // Check if this level has a reward
+    const reward = REWARD_TIERS[newLevel as RewardTier];
+    if (!reward) {
+      return { success: true, rewardGiven: false };
     }
 
-    // Apply reward
-    if (reward.type === 'free_days') {
-      await whopsdk.memberships.addFreeDays(membership.id, {
-        days: reward.value,
-      });
-    } else if (reward.type === 'discount') {
-      // For level 100, we want a permanent 50% discount
-      // Whop doesn't directly support permanent discounts on plans
-      // So we'll create a long-lasting promo code with multiple uses or document the discount
-      // For now, creating a promocode as a workaround
-      const promoCode = await whopsdk.promoCodes.create({
-        code: `LEVEL100_${userId.slice(-6)}`,
-        discount_type: 'percentage',
-        discount_value: 50,
-        max_uses: 10, // Allow multiple uses for renewal discount
-        user_id: userId,
-        metadata: {
-          description: `50% discount for reaching level 100 in WEE5`,
-          level_reward: 100
-        }
-      });
-      
-      // Also send a notification about the permanent discount
-      await whopsdk.notifications.sendPushNotification({
-        user_id: userId,
-        title: `🎉 Level 100 Achieved!`,
-        message: `You've unlocked a permanent 50% discount! Use promo code ${promoCode.code} for your next renewal.`,
-      });
+    // Check if reward already claimed
+    const { data: existingReward } = await supabaseAdmin
+      .from('rewards')
+      .select('*')
+      .eq('user_id', userId)
+      .eq('experience_id', experienceId)
+      .eq('level_achieved', newLevel)
+      .single();
+
+    if (existingReward) {
+      console.log(`Reward for level ${newLevel} already claimed by user ${userId}`);
+      return { success: true, rewardGiven: false };
     }
 
-    // Log reward
+    // Get user's active membership from Whop
+    let whopMembershipId = null;
+    let rewardApplied = false;
+    
+    try {
+      // Fetch user's memberships from Whop SDK
+      const memberships = await listUserMemberships(userId);
+      const activeMembership = memberships.data?.find(
+        (m: any) => m.experience_id === experienceId && m.status === 'active'
+      );
+
+      if (!activeMembership) {
+        console.error(`No active membership found for user ${userId} in experience ${experienceId}`);
+        return { 
+          success: true,
+          rewardGiven: false,
+          error: 'No active membership found' 
+        };
+      }
+
+      whopMembershipId = activeMembership.id;
+
+      // Apply reward via Whop SDK
+      if (reward.type === 'free_days') {
+        // Add free days to membership using SDK
+        await addFreeDaysToMembership(whopMembershipId, reward.value);
+        console.log(`✅ Added ${reward.value} free days to membership ${whopMembershipId}`);
+        rewardApplied = true;
+      } else if (reward.type === 'discount') {
+        // Create promo code for discount using SDK
+        const promoCode = await createPromoCode({
+          code: `LEVEL${newLevel}_${userId.substring(0, 8)}`,
+          discountPercent: reward.value,
+          maxUses: 1,
+          expiresAt: new Date(Date.now() + 365 * 24 * 60 * 60 * 1000), // 1 year
+        });
+        console.log(`✅ Created ${reward.value}% discount promo code: ${promoCode.code}`);
+        rewardApplied = true;
+      }
+    } catch (apiError) {
+      console.error('Error applying reward via Whop API:', apiError);
+      Sentry.captureException(apiError);
+      // Continue to record in database even if API call fails
+    }
+    
+    // Record reward in database
     await supabaseAdmin.from('rewards').insert({
       user_id: userId,
+      experience_id: experienceId,
       level_achieved: newLevel,
       reward_type: reward.type,
       reward_value: reward.value.toString(),
-      whop_membership_id: membership.id,
+      whop_membership_id: whopMembershipId || `pending_${userId}_${newLevel}`,
     });
 
-    // Send notification
-    await whopsdk.notifications.sendPushNotification({
-      user_id: userId,
-      title: `🎉 Level ${newLevel} Reached!`,
-      message: reward.type === 'free_days'
-        ? `You've earned ${reward.value} free days!`
-        : `You've earned a permanent 50% discount!`,
-    });
+    console.log(`✅ Level ${newLevel} reward recorded for user ${userId}: ${reward.type} = ${reward.value}`);
+    
+    // Send push notification to user about reward using SDK
+    try {
+      await sendPushNotification({
+        userId,
+        title: `🎉 Level ${newLevel} Reward!`,
+        message: `You've earned ${reward.value} ${reward.type === 'free_days' ? 'free days' : '% discount'}!`,
+        experienceId,
+      });
+      console.log(`✅ Sent reward notification to user ${userId}`);
+    } catch (notifError) {
+      console.error('Error sending reward notification:', notifError);
+      // Don't fail the whole operation if notification fails
+    }
+
+    return {
+      success: true,
+      rewardGiven: rewardApplied,
+      rewardType: reward.type,
+      rewardValue: reward.value,
+    };
 
   } catch (error) {
-    console.error('Error handling reward:', error);
+    console.error('Error handling level-up reward:', error);
+    Sentry.captureException(error);
+    return { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      rewardGiven: false 
+    };
+  }
+}
+
+/**
+ * Check if a user has access to premium features based on their tier
+ */
+export async function hasPremiumAccess(userId: string, experienceId: string): Promise<boolean> {
+  try {
+    const { data: user, error } = await supabaseAdmin
+      .from('users')
+      .select('tier')
+      .eq('user_id', userId)
+      .eq('experience_id', experienceId)
+      .single();
+
+    if (error) {
+      if (error.code !== 'PGRST116') { // No row found is OK
+        Sentry.captureException(error);
+      }
+      return false;
+    }
+
+    return user?.tier === 'premium' || user?.tier === 'enterprise' || user?.tier === 'lifetime';
+  } catch (error) {
+    console.error('Error checking premium access:', error);
+    Sentry.captureException(error);
+    return false;
+  }
+}
+
+/**
+ * Check if a user has enterprise access
+ */
+export async function hasEnterpriseAccess(userId: string, experienceId: string): Promise<boolean> {
+  try {
+    const { data: user, error } = await supabaseAdmin
+      .from('users')
+      .select('tier')
+      .eq('user_id', userId)
+      .eq('experience_id', experienceId)
+      .single();
+
+    if (error) {
+      if (error.code !== 'PGRST116') {
+        Sentry.captureException(error);
+      }
+      return false;
+    }
+
+    return user?.tier === 'enterprise' || user?.tier === 'lifetime';
+  } catch (error) {
+    console.error('Error checking enterprise access:', error);
+    Sentry.captureException(error);
+    return false;
   }
 }

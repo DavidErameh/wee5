@@ -1,104 +1,75 @@
-import { Button } from "@whop/react/components";
-import { headers } from "next/headers";
-import Link from "next/link";
-import { whopsdk } from "@/lib/whop-sdk";
-import { supabaseAdmin } from '@/lib/db';
+import { Suspense } from 'react';
+import { AnalyticsDashboard } from '@/components/AnalyticsDashboard';
+import { XpConfigurator } from '@/components/XpConfigurator';
+import { UpgradeButton } from '@/components/UpgradeButton';
+import ErrorBoundary from '@/components/common/ErrorBoundary';
 
-export default async function DashboardPage({
-	params,
-}: {
-	params: Promise<{ companyId: string }>;
+export default async function DashboardPage({ 
+  params 
+}: { 
+  params: { companyId: string } 
 }) {
-	const { companyId } = await params;
-	// Ensure the user is logged in on whop.
-	const { userId } = await whopsdk.verifyUserToken(await headers());
+  const { companyId } = await params;
 
-	// Fetch the neccessary data we want from whop.
-	const [company, user, access] = await Promise.all([
-		whopsdk.companies.retrieve(companyId),
-		whopsdk.users.retrieve(userId),
-		whopsdk.users.checkAccess(companyId, { id: userId }),
-	]);
+  return (
+    <div className="min-h-screen bg-gray-50 p-6">
+      <header className="mb-8">
+        <div className="flex justify-between items-center">
+          <div>
+            <h1 className="text-3xl font-bold text-gray-900">WEE5 Dashboard</h1>
+            <p className="text-gray-600">Manage your community gamification</p>
+          </div>
+          <UpgradeButton experienceId={companyId} />
+        </div>
+      </header>
 
-	// Check if this company has premium features enabled
-	const { data: userRecord } = await supabaseAdmin
-		.from('users')
-		.select('tier')
-		.eq('user_id', userId)
-		.eq('experience_id', companyId)
-		.single();
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold mb-4">XP Configuration</h2>
+            <ErrorBoundary fallback={
+              <div className="h-32 bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                <h3 className="text-lg font-semibold text-red-800 mb-2">Error Loading XP Configuration</h3>
+                <p className="text-red-600 text-sm">There was an issue loading the XP configuration.</p>
+              </div>
+            }>
+              <Suspense fallback={<div className="h-32 bg-gray-100 rounded-lg animate-pulse" />}>
+                <XpConfigurator experienceId={companyId} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        </div>
 
-	const userTier = userRecord?.tier || 'free';
-	const displayName = user.name || `@${user.username}`;
+        <div className="lg:col-span-2">
+          <div className="bg-white rounded-lg shadow p-6">
+            <h2 className="text-xl font-semibold mb-4">Analytics</h2>
+            <ErrorBoundary fallback={
+              <div className="h-96 bg-red-50 border border-red-200 rounded-lg p-6 text-center">
+                <h3 className="text-lg font-semibold text-red-800 mb-2">Error Loading Analytics</h3>
+                <p className="text-red-600 text-sm">There was an issue loading the analytics dashboard.</p>
+              </div>
+            }>
+              <Suspense fallback={<div className="h-96 bg-gray-100 rounded-lg animate-pulse" />}>
+                <AnalyticsDashboard experienceId={companyId} />
+              </Suspense>
+            </ErrorBoundary>
+          </div>
+        </div>
+      </div>
 
-	return (
-		<div className="flex flex-col p-8 gap-6">
-			<div className="flex justify-between items-center gap-4">
-				<div>
-					<h1 className="text-9">
-						Hi <strong>{displayName}</strong>!
-					</h1>
-					<p className="text-4 text-gray-10 mt-1">Community: {company.name}</p>
-					<p className="text-3 text-gray-9 mt-1">Tier: <span className={userTier === 'premium' || userTier === 'enterprise' ? 'text-blue-600 font-medium' : 'text-gray-700'}>{userTier.charAt(0).toUpperCase() + userTier.slice(1)}</span></p>
-				</div>
-				<div className="flex gap-3">
-					<Link href="https://docs.whop.com/apps" target="_blank">
-						<Button variant="classic" size="3">
-							Developer Docs
-						</Button>
-					</Link>
-					{userTier === 'free' && (
-						<Link href={`/dashboard/${companyId}/upgrade`}>
-							<Button variant="classic" color="blue" size="3">
-								Upgrade to Premium
-							</Button>
-						</Link>
-					)}
-				</div>
-			</div>
-
-			<div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-				<Link href={`/experiences/${companyId}`} className="block">
-					<div className="border border-gray-a4 rounded-xl p-6 bg-gray-a2 hover:bg-gray-a3 transition-colors h-full">
-						<h3 className="text-5 font-bold mb-2">Community Leaderboard</h3>
-						<p className="text-3 text-gray-10">View and manage your community's leaderboard</p>
-					</div>
-				</Link>
-
-				{userTier !== 'free' && (
-					<>
-						<Link href={`/dashboard/${companyId}/xp-config`} className="block">
-							<div className="border border-gray-a4 rounded-xl p-6 bg-blue-1 hover:bg-blue-2 transition-colors h-full">
-								<h3 className="text-5 font-bold mb-2">XP Configuration</h3>
-								<p className="text-3 text-gray-10">Customize XP rewards for activities</p>
-							</div>
-						</Link>
-
-						<Link href={`/dashboard/${companyId}/analytics`} className="block">
-							<div className="border border-gray-a4 rounded-xl p-6 bg-green-1 hover:bg-green-2 transition-colors h-full">
-								<h3 className="text-5 font-bold mb-2">Analytics</h3>
-								<p className="text-3 text-gray-10">Track engagement and growth metrics</p>
-							</div>
-						</Link>
-					</>
-				)}
-
-				<div className="border border-gray-a4 rounded-xl p-6 bg-gray-a2 h-full">
-					<h3 className="text-5 font-bold mb-2">About WEE5</h3>
-					<p className="text-3 text-gray-10">WEE5 gamifies your Whop community with XP, levels, and rewards.</p>
-					<p className="text-3 text-gray-10 mt-2">Users earn XP for messages, posts, and reactions, and receive rewards when they level up!</p>
-				</div>
-			</div>
-
-			{userTier === 'free' && (
-				<div className="border border-yellow-500 rounded-xl p-6 bg-yellow-50 mt-6">
-					<h3 className="text-5 font-bold mb-2">Upgrade to Premium</h3>
-					<p className="text-3 text-gray-10 mb-3">Unlock advanced features like custom XP rates, detailed analytics, and anti-cheat measures.</p>
-					<Link href={`/dashboard/${companyId}/upgrade`}>
-						<Button variant="classic" color="blue">Learn More & Upgrade</Button>
-					</Link>
-				</div>
-			)}
-		</div>
-	);
+      <div className="mt-8 bg-white rounded-lg shadow p-6">
+        <h2 className="text-xl font-semibold mb-4">Community Settings</h2>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="p-4 border rounded-lg">
+            <h3 className="font-medium mb-2">Anti-Cheat Settings</h3>
+            <p className="text-sm text-gray-600">Configure activity monitoring and spam detection</p>
+          </div>
+          <div className="p-4 border rounded-lg">
+            <h3 className="font-medium mb-2">Reward Configuration</h3>
+            <p className="text-sm text-gray-600">Customize level-up rewards and bonuses</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }

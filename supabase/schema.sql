@@ -1,94 +1,84 @@
--- Users table to store XP, level, and activity data
-CREATE TABLE IF NOT EXISTS users (
+
+-- Users table: Core XP/level tracking
+CREATE TABLE users (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id TEXT NOT NULL, -- Whop user ID
-  experience_id TEXT NOT NULL, -- Whop experience ID
-  xp INTEGER DEFAULT 0,
-  level INTEGER DEFAULT 1,
-  total_messages INTEGER DEFAULT 0,
-  total_posts INTEGER DEFAULT 0,
-  total_reactions INTEGER DEFAULT 0,
-  tier TEXT DEFAULT 'free', -- 'free', 'premium', 'enterprise'
-  last_activity_at TIMESTAMP WITH TIME ZONE,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(user_id, experience_id)
+  user_id TEXT NOT NULL UNIQUE,
+  experience_id TEXT NOT NULL,
+  xp INTEGER DEFAULT 0 NOT NULL CHECK (xp >= 0),
+  level INTEGER DEFAULT 1 NOT NULL CHECK (level >= 1),
+  total_messages INTEGER DEFAULT 0 NOT NULL CHECK (total_messages >= 0),
+  total_posts INTEGER DEFAULT 0 NOT NULL CHECK (total_posts >= 0),
+  total_reactions INTEGER DEFAULT 0 NOT NULL CHECK (total_reactions >= 0),
+  last_activity_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  created_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  updated_at TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- XP configuration table for custom rates (premium feature)
-CREATE TABLE IF NOT EXISTS xp_configurations (
+-- Indexes for performance
+CREATE INDEX idx_users_user_id ON users(user_id);
+CREATE INDEX idx_users_experience_id ON users(experience_id);
+CREATE INDEX idx_users_xp_desc ON users(xp DESC);
+CREATE INDEX idx_users_experience_xp ON users(experience_id, xp DESC);
+CREATE INDEX idx_users_last_activity ON users(last_activity_at DESC);
+
+-- Rewards tracking
+CREATE TABLE rewards (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  experience_id TEXT NOT NULL UNIQUE,
-  xp_per_message INTEGER DEFAULT 20,
-  min_xp_per_post INTEGER DEFAULT 15,
-  max_xp_per_post INTEGER DEFAULT 25,
-  xp_per_reaction INTEGER DEFAULT 5,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  user_id TEXT NOT NULL,
+  experience_id TEXT NOT NULL,
+  level_achieved INTEGER NOT NULL CHECK (level_achieved > 0),
+  reward_type TEXT NOT NULL CHECK (reward_type IN ('free_days', 'discount')),
+  reward_value TEXT NOT NULL,
+  whop_membership_id TEXT,
+  claimed_at TIMESTAMPTZ DEFAULT NOW() NOT NULL,
+  UNIQUE(user_id, experience_id, level_achieved)
 );
 
--- Activity log to track all XP-earning activities
-CREATE TABLE IF NOT EXISTS activity_log (
+CREATE INDEX idx_rewards_user_id ON rewards(user_id);
+CREATE INDEX idx_rewards_experience_id ON rewards(experience_id);
+
+-- Activity log (optional, for analytics)
+CREATE TABLE activity_log (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id TEXT NOT NULL,
   experience_id TEXT NOT NULL,
   activity_type TEXT NOT NULL CHECK (activity_type IN ('message', 'post', 'reaction')),
-  xp_awarded INTEGER NOT NULL,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+  xp_awarded INTEGER NOT NULL CHECK (xp_awarded > 0),
+  timestamp TIMESTAMPTZ DEFAULT NOW() NOT NULL
 );
 
--- Rewards table to track earned rewards
-CREATE TABLE IF NOT EXISTS rewards (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  user_id TEXT NOT NULL,
-  level_achieved INTEGER NOT NULL,
-  reward_type TEXT NOT NULL, -- 'free_days', 'discount', etc.
-  reward_value TEXT NOT NULL,
-  whop_membership_id TEXT,
-  claimed_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
-);
+CREATE INDEX idx_activity_log_user_id ON activity_log(user_id);
+CREATE INDEX idx_activity_log_experience_id ON activity_log(experience_id);
+CREATE INDEX idx_activity_log_timestamp ON activity_log(timestamp DESC);
 
--- Engagement analytics table (premium feature)
-CREATE TABLE IF NOT EXISTS engagement_analytics (
-  id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
-  experience_id TEXT NOT NULL,
-  date DATE NOT NULL,
-  total_xp_earned INTEGER DEFAULT 0,
-  total_users_active INTEGER DEFAULT 0,
-  messages_sent INTEGER DEFAULT 0,
-  posts_created INTEGER DEFAULT 0,
-  reactions_given INTEGER DEFAULT 0,
-  new_levels_achieved INTEGER DEFAULT 0,
-  created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-  UNIQUE(experience_id, date)
-);
-
--- Create indexes for better performance
-CREATE INDEX IF NOT EXISTS idx_users_user_experience ON users(user_id, experience_id);
-CREATE INDEX IF NOT EXISTS idx_users_xp ON users(xp DESC);
-CREATE INDEX IF NOT EXISTS idx_xp_configurations_experience ON xp_configurations(experience_id);
-CREATE INDEX IF NOT EXISTS idx_engagement_analytics_experience_date ON engagement_analytics(experience_id, date);
-CREATE INDEX IF NOT EXISTS idx_activity_log_user ON activity_log(user_id);
-CREATE INDEX IF NOT EXISTS idx_rewards_user_level ON rewards(user_id, level_achieved);
-
--- Function to update the updated_at timestamp
+-- Auto-update updated_at trigger
 CREATE OR REPLACE FUNCTION update_updated_at_column()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW updated_at = NOW();
-    RETURN NEW;
+  NEW.updated_at = NOW();
+  RETURN NEW;
 END;
 $$ language 'plpgsql';
 
--- Trigger to update the updated_at column for users
 CREATE TRIGGER update_users_updated_at 
-    BEFORE UPDATE ON users 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+  BEFORE UPDATE ON users
+  FOR EACH ROW 
+  EXECUTE FUNCTION update_updated_at_column();
 
--- Trigger to update the updated_at column for xp_configurations
-CREATE TRIGGER update_xp_configurations_updated_at 
-    BEFORE UPDATE ON xp_configurations 
-    FOR EACH ROW 
-    EXECUTE FUNCTION update_updated_at_column();
+-- Enable Row Level Security (RLS)
+ALTER TABLE users ENABLE ROW LEVEL SECURITY;
+ALTER TABLE rewards ENABLE ROW LEVEL SECURITY;
+ALTER TABLE activity_log ENABLE ROW LEVEL SECURITY;
+
+-- RLS Policies (allow service role full access, users read-only)
+CREATE POLICY "Allow public read access" ON users
+  FOR SELECT USING (true);
+
+CREATE POLICY "Allow service role full access" ON users
+  FOR ALL USING (auth.jwt() ->> 'role' = 'service_role');
+
+CREATE POLICY "Allow public read access" ON rewards
+  FOR SELECT USING (true);
+
+CREATE POLICY "Allow service role full access" ON rewards
+  FOR ALL USING (auth.jwt() ->> 'role' = 'service_role');

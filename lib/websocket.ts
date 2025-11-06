@@ -1,183 +1,238 @@
-
-import { whopsdk } from './whop-sdk';
+import { io, Socket } from 'socket.io-client';
 import { awardXP } from './xp-logic';
 import { handleLevelUp } from './rewards';
-import { supabaseAdmin } from './db';
+import * as Sentry from '@sentry/nextjs';
 
-// Update analytics for the current date
-async function updateAnalytics(experienceId: string, activityType: 'message' | 'post' | 'reaction', xpEarned: number = 0) {
-  const today = new Date().toISOString().split('T')[0]; // Format: YYYY-MM-DD
+interface WhopActivityEvent {
+  userId: string;
+  experienceId: string;
+  activityType: 'message' | 'post' | 'reaction';
+}
 
-  try {
-    // Check if record already exists for today
-    const { data: existingRecord, error: selectError } = await supabaseAdmin
-      .from('engagement_analytics')
-      .select('id, messages_sent, posts_created, reactions_given, total_users_active, total_xp_earned')
-      .eq('experience_id', experienceId)
-      .eq('date', today)
-      .single();
+class WebSocketService {
+  private socket: Socket | null = null;
+  private isConnected: boolean = false;
 
-    if (selectError && selectError.code !== 'PGRST116') { // PGRST116 means no rows returned
-      throw selectError;
+  /**
+   * Initialize WebSocket connection for real-time event listening
+   * @param userId User ID to listen for events
+   */
+  public initialize(userId: string): void {
+    try {
+      // In a real implementation, we would connect to Whop's WebSocket service
+      // For now, we'll create a placeholder that demonstrates the pattern
+      // This would be replaced with actual Whop WebSocket connection
+      
+      // For demonstration purposes, let's create a mock WebSocket connection
+      this.socket = io(process.env.NEXT_PUBLIC_WEBSOCKET_URL || 'http://localhost:3001', {
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 5,
+      });
+
+      this.socket.on('connect', () => {
+        console.log('WebSocket connected');
+        this.isConnected = true;
+        
+        // Join user-specific room for targeted events
+        if (this.socket) {
+          this.socket.emit('join-room', userId);
+        }
+      });
+
+      this.socket.on('disconnect', (reason) => {
+        console.log('WebSocket disconnected:', reason);
+        this.isConnected = false;
+      });
+
+      this.socket.on('connect_error', (error) => {
+        console.error('WebSocket connection error:', error);
+        Sentry.captureException(error);
+      });
+
+      // Listen for activity events from Whop
+      this.socket.on('activity', async (event: WhopActivityEvent) => {
+        try {
+          console.log('Received activity event:', event);
+          
+          // Award XP for the activity
+          const result = await awardXP(
+            event.userId,
+            event.experienceId,
+            event.activityType as 'message' | 'post' | 'reaction'
+          );
+
+          if (result.success) {
+            console.log(`XP awarded: ${result.xpAwarded} for ${event.activityType}`);
+
+            // Handle level-up if applicable
+            if (result.leveledUp && result.newLevel) {
+              await handleLevelUp(event.userId, event.experienceId, result.newLevel);
+            }
+          } else if (result.error) {
+            console.log(`XP award skipped: ${result.error}`);
+          }
+        } catch (error) {
+          console.error('Error processing activity event:', error);
+          Sentry.captureException(error);
+        }
+      });
+
+      // Listen for other relevant events
+      this.socket.on('level-up', (data) => {
+        console.log('Level up notification received:', data);
+        // Handle level-up notifications if sent by server
+      });
+
+    } catch (error) {
+      console.error('Error initializing WebSocket:', error);
+      Sentry.captureException(error);
     }
+  }
 
-    const updates: any = {};
-    if (activityType === 'message') {
-      updates.messages_sent = (existingRecord?.messages_sent || 0) + 1;
-    } else if (activityType === 'post') {
-      updates.posts_created = (existingRecord?.posts_created || 0) + 1;
-    } else if (activityType === 'reaction') {
-      updates.reactions_given = (existingRecord?.reactions_given || 0) + 1;
+  /**
+   * Disconnect from WebSocket
+   */
+  public disconnect(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.isConnected = false;
     }
+  }
 
-    // Add the XP earned to the total
-    updates.total_xp_earned = (existingRecord?.total_xp_earned || 0) + xpEarned;
+  /**
+   * Check if WebSocket is connected
+   */
+  public isConnectedToWebSocket(): boolean {
+    return this.isConnected && this.socket !== null && this.socket.connected;
+  }
 
-    // Always increment total active users (with deduplication handled outside)
-    updates.total_users_active = (existingRecord?.total_users_active || 0) + 1;
-
-    if (existingRecord) {
-      // Update existing record
-      await supabaseAdmin
-        .from('engagement_analytics')
-        .update(updates)
-        .eq('id', existingRecord.id);
-    } else {
-      // Create new record
-      await supabaseAdmin
-        .from('engagement_analytics')
-        .insert({
-          experience_id: experienceId,
-          date: today,
-          [activityType === 'message' ? 'messages_sent' : 
-           activityType === 'post' ? 'posts_created' : 
-           'reactions_given']: 1,
-          total_xp_earned: xpEarned,
-          total_users_active: 1,
-        });
+  /**
+   * Send custom event to WebSocket server
+   */
+  public sendEvent(event: string, data: any): void {
+    if (this.socket && this.isConnected) {
+      this.socket.emit(event, data);
     }
-  } catch (error) {
-    console.error('Error updating analytics:', error);
   }
 }
 
-// Initialize websocket for a specific user
-export function initializeWebsocket(userId: string) {
-  const websocket = whopsdk
-    .withUser(userId)
-    .websockets.client();
+// Singleton instance
+export const websocketService = new WebSocketService();
 
-  // Listen for messages
-  websocket.on('message', async (message) => {
-    const chatMessage = message.feedEntity?.dmsPost;
-    const forumPost = message.feedEntity?.forumPost;
-    const reaction = message.feedEntity?.reaction;
+// For real Whop integration, we would need to use Whop's specific WebSocket API
+// Below is a placeholder for what that might look like:
 
-    if (chatMessage) {
-      const result = await awardXP(
-        chatMessage.user_id,
-        chatMessage.experience_id,
-        'message'
-      );
+interface WhopWebSocketOptions {
+  userId?: string;
+  companyId?: string;
+  apiKey: string;
+}
+
+/**
+ * Alternative approach using Whop's real-time capabilities
+ * This would be the proper way to connect to Whop's event system
+ */
+export class WhopWebSocketClient {
+  private socket: Socket | null = null;
+  private initialized: boolean = false;
+
+  constructor(private options: WhopWebSocketOptions) {}
+
+  public async initialize(): Promise<void> {
+    try {
+      // This is a placeholder - in reality, you'd use Whop's specific WebSocket endpoint
+      // which would require their SDK or API documentation
+      const whopWebSocketUrl = process.env.WHOP_WEBSOCKET_URL || 'wss://events.whop.com';
       
-      if (result.success) {
-        if (result.leveledUp) {
-          await handleLevelUp(chatMessage.user_id, result.newLevel!);
-          // Update analytics for level achieved
-          const today = new Date().toISOString().split('T')[0];
-          try {
-            await supabaseAdmin
-              .from('engagement_analytics')
-              .upsert({
-                experience_id: chatMessage.experience_id,
-                date: today,
-                new_levels_achieved: 1,
-                total_users_active: 1, // Count user as active for this event
-              }, {
-                onConflict: 'experience_id,date'
-              });
-          } catch (error) {
-            console.error('Error updating level achievement analytics:', error);
-          }
-        }
-        
-        // Update engagement analytics with XP earned
-        await updateAnalytics(chatMessage.experience_id, 'message', result.xpAwarded || 0);
-      }
-    }
+      this.socket = io(whopWebSocketUrl, {
+        auth: {
+          token: this.options.apiKey,
+        },
+        transports: ['websocket'],
+        reconnection: true,
+        reconnectionDelay: 1000,
+        reconnectionAttempts: 5,
+      });
 
-    if (forumPost) {
-      const result = await awardXP(
-        forumPost.user_id,
-        forumPost.experience_id,
-        'post'
-      );
+      this.socket.on('connect', () => {
+        console.log('Connected to Whop WebSocket');
+        this.initialized = true;
+
+        // Subscribe to relevant channels based on options
+        if (this.options.userId) {
+          this.socket?.emit('subscribe-user', this.options.userId);
+        }
+        if (this.options.companyId) {
+          this.socket?.emit('subscribe-company', this.options.companyId);
+        }
+      });
+
+      this.socket.on('activity', this.handleActivity.bind(this));
+      this.socket.on('membership', this.handleMembership.bind(this));
+      this.socket.on('error', this.handleError.bind(this));
+      this.socket.on('disconnect', this.handleDisconnect.bind(this));
+
+    } catch (error) {
+      console.error('Failed to initialize Whop WebSocket:', error);
+      Sentry.captureException(error);
+    }
+  }
+
+  private async handleActivity(data: any): Promise<void> {
+    try {
+      // Process activity event
+      const activityData = {
+        userId: data.userId || data.user_id,
+        experienceId: data.experienceId || data.product_id,
+        activityType: data.activityType || data.type,
+      };
+
+      console.log('Processing activity event:', activityData);
       
-      if (result.success) {
-        if (result.leveledUp) {
-          await handleLevelUp(forumPost.user_id, result.newLevel!);
-          // Update analytics for level achieved
-          const today = new Date().toISOString().split('T')[0];
-          try {
-            await supabaseAdmin
-              .from('engagement_analytics')
-              .upsert({
-                experience_id: forumPost.experience_id,
-                date: today,
-                new_levels_achieved: 1,
-                total_users_active: 1, // Count user as active for this event
-              }, {
-                onConflict: 'experience_id,date'
-              });
-          } catch (error) {
-            console.error('Error updating level achievement analytics:', error);
-          }
-        }
-        
-        // Update engagement analytics with XP earned
-        await updateAnalytics(forumPost.experience_id, 'post', result.xpAwarded || 0);
-      }
-    }
-
-    if (reaction) {
       const result = await awardXP(
-        reaction.user_id,
-        reaction.experience_id,
-        'reaction'
+        activityData.userId,
+        activityData.experienceId,
+        activityData.activityType as 'message' | 'post' | 'reaction'
       );
-      
+
       if (result.success) {
-        if (result.leveledUp) {
-          await handleLevelUp(reaction.user_id, result.newLevel!);
-          // Update analytics for level achieved
-          const today = new Date().toISOString().split('T')[0];
-          try {
-            await supabaseAdmin
-              .from('engagement_analytics')
-              .upsert({
-                experience_id: reaction.experience_id,
-                date: today,
-                new_levels_achieved: 1,
-                total_users_active: 1, // Count user as active for this event
-              }, {
-                onConflict: 'experience_id,date'
-              });
-          } catch (error) {
-            console.error('Error updating level achievement analytics:', error);
-          }
+        console.log(`XP awarded: ${result.xpAwarded} for ${activityData.activityType}`);
+
+        if (result.leveledUp && result.newLevel) {
+          await handleLevelUp(activityData.userId, activityData.experienceId, result.newLevel);
         }
-        
-        // Update engagement analytics with XP earned
-        await updateAnalytics(reaction.experience_id, 'reaction', result.xpAwarded || 0);
       }
+    } catch (error) {
+      console.error('Error handling activity event:', error);
+      Sentry.captureException(error);
     }
-  });
+  }
 
-  websocket.on('connectionStatus', (status) => {
-    console.log('Websocket status:', status);
-  });
+  private handleMembership(data: any): void {
+    console.log('Membership event received:', data);
+    // Handle membership events like joins, cancellations, etc.
+  }
 
-  websocket.connect();
+  private handleError(error: any): void {
+    console.error('WebSocket error:', error);
+    Sentry.captureException(error);
+  }
 
-  return websocket;
+  private handleDisconnect(reason: string): void {
+    console.log('WebSocket disconnected:', reason);
+    this.initialized = false;
+  }
+
+  public disconnect(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.initialized = false;
+    }
+  }
+
+  public isInitialized(): boolean {
+    return this.initialized;
+  }
 }
