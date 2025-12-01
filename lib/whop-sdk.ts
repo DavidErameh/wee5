@@ -6,28 +6,37 @@
  * including memberships, notifications, and API interactions.
  * 
  * INSTALLATION REQUIRED:
- * Run: pnpm add whop-sdk-ts
+ * Run: pnpm add @whop/api
  */
 
-import { WhopServerSdk } from 'whop-sdk-ts';
+import { WhopServerSdk } from '@whop/api';
 
-// Initialize Whop SDK client with API key
-export const whopClient = new WhopServerSdk({
-  apiKey: process.env.WHOP_API_KEY!,
+// Standard SDK instance (for most operations)
+export const whopSdk = WhopServerSdk({
+  appApiKey: process.env.WHOP_API_KEY!,
+  appId: process.env.NEXT_PUBLIC_WHOP_APP_ID!,
+});
+
+// Legacy export for backward compatibility
+export const whopClient = whopSdk;
+
+// Agent SDK instance (for actions on behalf of agent user)
+export const agentSdk = WhopServerSdk({
+  appApiKey: process.env.WHOP_API_KEY!,
+  appId: process.env.NEXT_PUBLIC_WHOP_APP_ID!,
+  onBehalfOfUserId: process.env.WHOP_AGENT_USER_ID!,
+});
+
+// GraphQL headers for DM/post operations
+export const getAgentHeaders = () => ({
+  'Content-Type': 'application/json',
+  'Authorization': `Bearer ${process.env.WHOP_API_KEY}`,
+  'x-on-behalf-of': process.env.WHOP_AGENT_USER_ID!,
 });
 
 // Helper function to get SDK client with user context
 export function getWhopClientForUser(userId: string) {
-  return whopClient.withUserId(userId);
-}
-
-// Helper function to get SDK client with bot user context
-export function getWhopBotClient() {
-  const botUserId = process.env.WHOP_BOT_USER_ID;
-  if (!botUserId) {
-    throw new Error('WHOP_BOT_USER_ID not configured');
-  }
-  return whopClient.withUserId(botUserId);
+  return whopSdk.withUser(userId);
 }
 
 // Membership helpers using SDK

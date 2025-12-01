@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { useNotification } from '@/contexts/NotificationContext';
-import { BadgeAssignment } from '@/components/BadgeAssignment';
+import { BadgeAssignment } from '@/components/BadgeAssignment/BadgeAssignment';
 
 interface User {
   id: string;

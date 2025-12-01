@@ -1,5 +1,7 @@
+import { AppError, handleError } from './error-handler';
 import { supabaseAdmin } from './db';
-import { redis as getRedis, isOnCooldown, setCooldown } from './redis';
+import { isOnCooldown, setCooldown, isDuplicateActivity, markActivityProcessed } from './redis';
+import { Redis } from '@upstash/redis';
 
 // XP values per activity type
 export const XP_VALUES = {
@@ -11,53 +13,128 @@ export const XP_VALUES = {
 
 export type ActivityType = 'message' | 'post' | 'reaction';
 
-interface AwardXPResult {
-  success: boolean;
-  xpAwarded?: number;
-  newTotalXp?: number;
-  leveledUp?: boolean;
-  oldLevel?: number;
-  newLevel?: number;
-  error?: string;
+/**
+ * Calculate level from total XP using MEE6 formula
+ * Formula: XP required for level N = 5 * N² + 50 * N + 100
+ * Using the inverse formula to solve for level directly: level = floor((-50 + sqrt(50² - 4*5*(100-XP))) / (2*5))
+ * CRITICAL: This must match the leveling progression
+ */
+export function calculateLevel(xp: number): number {
+  if (xp < 0) return 0;
+  if (xp === 0) return 0;
+
+  // Solve quadratic equation: 5N² + 50N + (100 - xp) = 0
+  // Using quadratic formula: N = (-b + sqrt(b² - 4ac)) / 2a
+  const a = 5;
+  const b = 50;
+  const c = 100 - xp;
+
+  const discriminant = b * b - 4 * a * c;
+  if (discriminant < 0) return 0;
+
+  const level = Math.floor((-b + Math.sqrt(discriminant)) / (2 * a));
+  return Math.max(0, level);
 }
 
+// Define the return types
+interface XPAwardSuccess {
+  success: true;
+  xpAwarded: number;
+  xp: number; // new total XP
+  level: number; // new level
+  leveledUp: boolean;
+  message?: string;
+}
+
+interface XPAwardFailure {
+  success: false;
+  reason: 'cooldown' | 'duplicate' | 'error';
+  message: string;
+}
+
+type XPAwardResult = XPAwardSuccess | XPAwardFailure;
+
 /**
- * Award XP to a user for an activity
- * CRITICAL: Includes cooldown check and level calculation
+ * Award XP to a user for an activity with enhanced error handling
+ * Uses PostgreSQL's atomic function to prevent race conditions
  */
-export async function awardXP(
-  userId: string,
-  experienceId: string,
-  activityType: ActivityType
-): Promise<AwardXPResult> {
+
+interface XPAwardParams {
+  userId: string;
+  experienceId: string;
+  activityType: 'message' | 'post' | 'reaction';
+  activityId?: string;  // Optional activity ID for deduplication (e.g. message ID)
+}
+
+export async function awardXP(params: XPAwardParams): Promise<XPAwardResult> {
+  const { userId, experienceId, activityType, activityId } = params;
+  const startTime = Date.now();
+  const context = {
+    operation: 'awardXP',
+    userId,
+    experienceId,
+    metadata: { activityType, activityId },
+  };
+
+  // Use a Redis-based distributed lock to prevent race conditions
+  const redis = new Redis({
+    url: process.env.UPSTASH_REDIS_REST_URL!,
+    token: process.env.UPSTASH_REDIS_REST_TOKEN!
+  });
+
+  // Create a unique lock key based on the user and activity
+  const lockKey = `xp_award_lock:${userId}:${activityId || `${Date.now()}_${Math.random()}`}`;
+  const lockTimeout = 5000; // 5 seconds timeout
+
+  // Attempt to acquire a distributed lock
+  const lockAcquired = await redis.set(lockKey, '1', {
+    nx: true, // Only set if key doesn't exist
+    px: lockTimeout // Expire after 5 seconds to prevent deadlock
+  });
+
+  if (!lockAcquired) {
+    // Another process is already handling XP award for this activity
+    return {
+      success: false,
+      reason: 'duplicate',
+      message: 'Activity is currently being processed'
+    };
+  }
+
   try {
-    // 1. Check cooldown (60 seconds)
-    if (await isOnCooldown(userId)) {
-      return { success: false, error: 'User is on cooldown' };
+    // 1. Check deduplication if activityId is provided
+    if (activityId) {
+      const isDuplicate = await isDuplicateActivity(userId, activityId);
+      if (isDuplicate) {
+        console.log('Duplicate activity detected:', { userId, activityType, activityId });
+        return {
+          success: false,
+          reason: 'duplicate',
+          message: 'Activity already processed'
+        };
+      }
     }
 
-    // 2. Get user record to check for tier
-    let { data: user, error: fetchError } = await supabaseAdmin()
-      .from('users')
-      .select('xp, level, tier, total_messages, total_posts, total_reactions')
-      .eq('user_id', userId)
-      .eq('experience_id', experienceId)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 = no rows found
-      throw fetchError;
+    // 2. Check cooldown
+    if (await isOnCooldown(userId)) {
+      console.log('User on cooldown:', { userId, activityType });
+      return {
+        success: false,
+        reason: 'cooldown',
+        message: 'Please wait before earning more XP'
+      };
     }
 
     // 3. Calculate XP to award based on user tier (for premium users)
     let xpToAward: number;
-    
+
     // Check for custom XP configuration (premium feature)
     const { data: xpConfig } = await supabaseAdmin()
       .from('xp_configurations')
       .select('*')
       .eq('experience_id', experienceId)
       .single();
-    
+
     if (xpConfig) {
       // Use custom XP rates for premium communities
       if (activityType === 'message' && xpConfig.xp_per_message) {
@@ -68,130 +145,82 @@ export async function awardXP(
         xpToAward = xpConfig.xp_per_reaction;
       } else {
         // Fallback to default if specific config not set
-        xpToAward = activityType === 'post' 
-          ? Math.floor(Math.random() * (XP_VALUES.POST_MAX - XP_VALUES.POST_MIN + 1)) + XP_VALUES.POST_MIN
-          : XP_VALUES[activityType.toUpperCase() as keyof typeof XP_VALUES];
+        xpToAward = activityType === 'post'
+          ? Math.floor(Math.random() * (25 - 15 + 1)) + 15
+          : activityType === 'message' ? 20 : 5;
       }
     } else {
       // Use default XP values for free tier
       if (activityType === 'post') {
-        xpToAward = Math.floor(Math.random() * (XP_VALUES.POST_MAX - XP_VALUES.POST_MIN + 1)) + XP_VALUES.POST_MIN;
+        xpToAward = Math.floor(Math.random() * (25 - 15 + 1)) + 15;
       } else {
-        xpToAward = XP_VALUES[activityType.toUpperCase() as keyof typeof XP_VALUES];
+        xpToAward = activityType === 'message' ? 20 : 5;
       }
     }
 
-    let isNewUser = false;
-    if (!user) {
-      // Create new user with default values
-      const { data: newUser, error: createError } = await supabaseAdmin()
-        .from('users')
-        .insert({
-          user_id: userId,
-          experience_id: experienceId,
-          xp: xpToAward,
-          level: 1, // Starting at level 1 (database constraint: level >= 1)
-          tier: 'free', // Default tier
-          [`total_${activityType}s`]: 1,
-        })
-        .select()
-        .single();
+    // 4. Use atomic function to award XP and handle user creation/update safely
+    const client = supabaseAdmin();
+    const { data, error } = await client.rpc('award_xp_atomic', {
+      p_user_id: userId,
+      p_experience_id: experienceId,
+      p_company_id: 'default', // Using 'default' for now, would come from webhook event in real implementation
+      p_xp_amount: xpToAward,
+      p_activity_type: activityType,
+    });
 
-      if (createError) throw createError;
-      
-      user = newUser;
-      isNewUser = true;
-    } else {
-      // 4. Update existing user
-      const newXp = user.xp + xpToAward;
-      const oldLevel = user.level;
-      const newLevel = calculateLevel(newXp);
-      const leveledUp = newLevel > oldLevel;
-
-      // Increment activity counter
-      const activityField = `total_${activityType}s` as keyof typeof user;
-      
-      // Define the update object with explicit typing
-      const updateData: any = {
-        xp: newXp,
-        level: newLevel,
-        last_activity_at: new Date().toISOString(),
-      };
-      
-      // Add the dynamic activity field with type-safe access
-      updateData[activityField] = (user[activityField] as number || 0) + 1;
-      
-      const { error: updateError } = await supabaseAdmin()
-        .from('users')
-        .update(updateData)
-        .eq('user_id', userId)
-        .eq('experience_id', experienceId);
-
-      if (updateError) throw updateError;
-
-      // 5. Log activity (optional)
-      try {
-        await supabaseAdmin().from('activity_log').insert({
-          user_id: userId,
-          experience_id: experienceId,
-          activity_type: activityType,
-          xp_awarded: xpToAward,
-        });
-      } catch (err) {
-        console.error('Failed to log activity:', err);
-      }
-
-      // 6. Set cooldown
-      await setCooldown(userId);
-
-      return {
-        success: true,
-        xpAwarded: xpToAward,
-        newTotalXp: newXp,
-        leveledUp,
-        oldLevel: leveledUp ? oldLevel : undefined,
-        newLevel: leveledUp ? newLevel : undefined,
-      };
+    if (error) {
+      throw new AppError('Database operation failed', 500, context);
     }
 
-    // New user case
+    // 5. Mark activity as processed in Redis for deduplication if activityId was provided
+    if (activityId) {
+      await markActivityProcessed(userId, activityId);
+    }
+
+    // 6. Set cooldown in Redis
     await setCooldown(userId);
+
+    // 7. Check for level up and process asynchronously
+    if (data?.leveled_up) {
+      // Process level up separately to not block XP awarding
+      import('./rewards').then(async ({ handleLevelUp }) => {
+        try {
+          await handleLevelUp(userId, experienceId, data.old_level, data.new_level);
+        } catch (levelUpError) {
+          console.error('Level up processing failed:', levelUpError);
+          // Don't fail XP award if level up processing fails
+        }
+      });
+    }
+
+    const duration = Date.now() - startTime;
+    console.log(`XP awarded successfully in ${duration}ms`);
 
     return {
       success: true,
       xpAwarded: xpToAward,
-      newTotalXp: xpToAward,
-      leveledUp: false,
+      xp: data?.new_xp,
+      level: data?.new_level,
+      leveledUp: data?.leveled_up,
+      message: `Successfully awarded ${xpToAward} XP`
     };
 
   } catch (error) {
-    console.error('Error awarding XP:', error);
-    return { 
-      success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error' 
+    console.error('Error in awardXP:', error);
+    return {
+      success: false,
+      reason: 'error',
+      message: 'Failed to award XP due to server error'
     };
+  } finally {
+    // Always release the distributed lock
+    try {
+      await redis.del(lockKey);
+    } catch (releaseError) {
+      console.error('Error releasing XP award lock:', releaseError);
+      // Don't fail the main operation if lock release fails
+    }
   }
-}
-
-/**
- * Calculate level from total XP using MEE6 formula
- * Formula: XP required for level N = 5 * (N^2) + 50 * N + 100
- * CRITICAL: This must match the leveling progression
- */
-export function calculateLevel(xp: number): number {
-  if (xp < 0) return 1; // Starting at level 1 (database constraint: level >= 1)
-  
-  let level = 1; // Start from level 1 (database constraint: level >= 1)
-  let cumulativeXp = 0;
-  
-  while (true) {
-    const xpForNext = xpForNextLevel(level);
-    if (cumulativeXp + xpForNext > xp) break;
-    cumulativeXp += xpForNext;
-    level++;
-  }
-  
-  return level;
 }
 
 /**
@@ -199,7 +228,7 @@ export function calculateLevel(xp: number): number {
  */
 export function xpForLevel(level: number): number {
   if (level <= 0) return 0;
-  
+
   let totalXp = 0;
   for (let l = 0; l < level; l++) {
     totalXp += xpForNextLevel(l);
@@ -224,9 +253,9 @@ export function calculateProgress(currentXp: number, currentLevel: number): {
 } {
   const xpAtCurrent = xpForLevel(currentLevel);
   const xpForNext = xpForNextLevel(currentLevel);
-  
+
   const xpProgress = currentXp - xpAtCurrent;
-  
+
   return {
     current: xpProgress,
     needed: xpForNext,

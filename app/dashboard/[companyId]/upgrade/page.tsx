@@ -1,5 +1,5 @@
 
-import { UpgradeButton } from '@/components/UpgradeButton';
+import { UpgradeButton } from '@/components/UpgradeButton/UpgradeButton';
 
 export default function UpgradePage() {
   return (

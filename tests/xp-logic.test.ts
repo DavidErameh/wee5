@@ -11,6 +11,7 @@ jest.mock('@/lib/db', () => ({
       select: jest.fn(() => ({
         eq: jest.fn(() => ({
           single: jest.fn(),
+          maybeSingle: jest.fn(),
         })),
       })),
       insert: jest.fn(() => ({
@@ -20,6 +21,10 @@ jest.mock('@/lib/db', () => ({
       })),
       update: jest.fn(() => ({
         eq: jest.fn(),
+      })),
+      rpc: jest.fn(() => ({
+        data: { old_level: 1, new_xp: 20, new_level: 1, leveled_up: false },
+        error: null
       })),
     })),
   })),
@@ -87,20 +92,29 @@ describe('Reward System', () => {
   test('should handle level-up rewards', async () => {
     // Mock the database response
     const { supabaseAdmin } = await import('@/lib/db');
-    (supabaseAdmin.from as Mock<any>)
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        eq: jest.fn().mockReturnThis(),
-        maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null }),
-      })
-      .mockReturnValueOnce({
-        select: jest.fn().mockReturnThis(),
-        eq: jest.fn().mockReturnThis(),
-        single: jest.fn().mockResolvedValue({
-          data: { id: 'membership_123' },
-          error: null
-        }),
-      });
+    const mockDb = (supabaseAdmin as jest.Mock).mock.results[0].value;
+    const mockFrom = mockDb.from as jest.Mock;
+    
+    // Mock the first call (for getRewardForLevel) - return null (no custom config)
+    mockFrom.mockImplementationOnce((table: string) => {
+      if (table === 'rewards_configs') {
+        return {
+          select: jest.fn().mockReturnThis(),
+          eq: jest.fn().mockReturnThis(),
+          maybeSingle: jest.fn().mockResolvedValue({ data: null, error: null })
+        };
+      }
+    });
+    
+    // Mock the second call (for level_ups insert) 
+    mockFrom.mockImplementationOnce(() => ({
+      insert: jest.fn().mockResolvedValue({ error: null })
+    }));
+    
+    // Mock the third call (for reward_history insert)
+    mockFrom.mockImplementationOnce(() => ({
+      insert: jest.fn().mockResolvedValue({ error: null })
+    }));
 
     const result = await handleLevelUp('user_123', 'exp_456', 5);
     expect(result.success).toBe(true);

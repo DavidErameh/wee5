@@ -15,7 +15,7 @@ export async function GET(req: NextRequest) {
     const yesterdayStr = yesterday.toISOString().split('T')[0];
 
     // 1. Get all experiences
-    const { data: experiences, error: experiencesError } = await supabaseAdmin
+    const { data: experiences, error: experiencesError } = await supabaseAdmin()
       .from('users')
       .select('experience_id')
       .distinct();
@@ -28,7 +28,7 @@ export async function GET(req: NextRequest) {
       const experienceId = experience.experience_id;
 
       // 2. Get all activities for the experience for yesterday
-      const { data: activities, error: activitiesError } = await supabaseAdmin
+      const { data: activities, error: activitiesError } = await supabaseAdmin()
         .from('activity_log')
         .select('*')
         .eq('experience_id', experienceId)
@@ -52,7 +52,7 @@ export async function GET(req: NextRequest) {
       const reactionsGiven = activities.filter(a => a.activity_type === 'reaction').length;
 
       // 4. Insert the aggregated data
-      const { error: insertError } = await supabaseAdmin
+      const { error: insertError } = await supabaseAdmin()
         .from('engagement_analytics')
         .insert({
           experience_id: experienceId,

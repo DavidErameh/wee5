@@ -1,0 +1,20 @@
+{
+    "routes": {
+        "experience": "/experiences/[experienceId]",
+        "dashboard": "/dashboard/[companyId]",
+        "discover": "/discover"
+    },
+    "permissions": [
+        "user:read",
+        "membership:read",
+        "experience:read",
+        "webhook:receive:membership",
+        "webhook:receive:payment"
+    ],
+    "metadata": {
+        "name": "WEE5",
+        "description": "Real-time XP, leveling, and rewards for your Whop community",
+        "version": "1.0.0",
+        "category": "engagement"
+    }
+}

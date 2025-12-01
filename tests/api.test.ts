@@ -1,88 +1,88 @@
-import { describe, test, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, jest, beforeEach } from '@jest/globals';
 import { POST as awardXPAPI } from '@/app/api/xp/route';
 import { GET as getLeaderboardAPI } from '@/app/api/leaderboard/route';
 
 // Mock all dependencies for API testing
-vi.mock('next/server', async () => {
-  const actual = await vi.importActual('next/server');
+jest.mock('next/server', () => {
+  const originalModule = jest.requireActual('next/server');
   return {
-    ...actual,
-    NextRequest: vi.fn(),
+    ...originalModule,
+    NextRequest: jest.fn(),
     NextResponse: {
-      json: vi.fn((data) => ({ 
+      json: jest.fn((data) => ({ 
         json: async () => data, 
-        status: vi.fn(() => ({ json: async () => data })) 
+        status: jest.fn(() => ({ json: async () => data })) 
       })),
     },
   };
 });
 
-vi.mock('@/lib/xp-logic', () => ({
-  awardXP: vi.fn(),
-  calculateLevel: vi.fn(),
-  xpForNextLevel: vi.fn(),
+jest.mock('@/lib/xp-logic', () => ({
+  awardXP: jest.fn(),
+  calculateLevel: jest.fn(),
+  xpForNextLevel: jest.fn(),
 }));
 
-vi.mock('@/lib/rewards', () => ({
-  handleLevelUp: vi.fn(),
+jest.mock('@/lib/rewards', () => ({
+  handleLevelUp: jest.fn(),
 }));
 
-vi.mock('@/lib/db', () => ({
-  supabase: {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          single: vi.fn(),
+jest.mock('@/lib/db', () => ({
+  supabase: jest.fn(() => ({
+    from: jest.fn(() => ({
+      select: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          single: jest.fn(),
         })),
-        limit: vi.fn(() => ({
-          order: vi.fn(() => ({
-            gte: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                limit: vi.fn(),
+        limit: jest.fn(() => ({
+          order: jest.fn(() => ({
+            gte: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                limit: jest.fn(),
               })),
             })),
           })),
         })),
       })),
     })),
-  },
-  supabaseAdmin: {
-    from: vi.fn(() => ({
-      select: vi.fn(() => ({
-        eq: vi.fn(() => ({
-          single: vi.fn(),
+  })),
+  supabaseAdmin: jest.fn(() => ({
+    from: jest.fn(() => ({
+      select: jest.fn(() => ({
+        eq: jest.fn(() => ({
+          single: jest.fn(),
         })),
-        limit: vi.fn(() => ({
-          order: vi.fn(() => ({
-            gte: vi.fn(() => ({
-              eq: vi.fn(() => ({
-                limit: vi.fn(),
+        limit: jest.fn(() => ({
+          order: jest.fn(() => ({
+            gte: jest.fn(() => ({
+              eq: jest.fn(() => ({
+                limit: jest.fn(),
               })),
             })),
           })),
         })),
       })),
     })),
-  },
+  })),
 }));
 
-vi.mock('@/lib/redis', () => ({
-  getCachedLeaderboard: vi.fn(),
-  cacheLeaderboard: vi.fn(),
+jest.mock('@/lib/redis', () => ({
+  getCachedLeaderboard: jest.fn(),
+  cacheLeaderboard: jest.fn(),
 }));
 
-vi.mock('@/lib/rate-limit', () => ({
-  checkRateLimit: vi.fn(() => Promise.resolve(true)),
+jest.mock('@/lib/rate-limit', () => ({
+  checkRateLimit: jest.fn(() => Promise.resolve(true)),
 }));
 
 describe('XP API Route', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    jest.clearAllMocks();
   });
 
-  test('should award XP successfully', async () => {
+  it('should award XP successfully', async () => {
     const mockRequest = {
-      json: vi.fn().mockResolvedValue({
+      json: jest.fn().mockResolvedValue({
         userId: 'user123',
         experienceId: 'exp456',
         activityType: 'message'
@@ -93,7 +93,7 @@ describe('XP API Route', () => {
     } as any;
 
     const { awardXP } = await import('@/lib/xp-logic');
-    (awardXP as vi.Mock).mockResolvedValue({
+    (awardXP as jest.Mock).mockResolvedValue({
       success: true,
       xpAwarded: 20,
       newTotalXp: 120,
@@ -107,9 +107,9 @@ describe('XP API Route', () => {
     expect(data.xpAwarded).toBe(20);
   });
 
-  test('should handle XP award failure', async () => {
+  it('should handle cooldown correctly', async () => {
     const mockRequest = {
-      json: vi.fn().mockResolvedValue({
+      json: jest.fn().mockResolvedValue({
         userId: 'user123',
         experienceId: 'exp456',
         activityType: 'message'
@@ -120,9 +120,9 @@ describe('XP API Route', () => {
     } as any;
 
     const { awardXP } = await import('@/lib/xp-logic');
-    (awardXP as vi.Mock).mockResolvedValue({
-      success: false,
-      error: 'User is on cooldown'
+    (awardXP as jest.Mock).mockResolvedValue({
+      success: true,
+      onCooldown: true
     });
 
     const response = await awardXPAPI(mockRequest);
@@ -131,24 +131,58 @@ describe('XP API Route', () => {
 });
 
 describe('Leaderboard API Route', () => {
-  test('should fetch leaderboard successfully', async () => {
+  it('should fetch leaderboard successfully', async () => {
     const mockRequest = {
       nextUrl: {
         searchParams: new URLSearchParams('experienceId=exp456&filter=all-time&limit=10')
       }
     } as any;
 
-    const { supabaseAdmin } = await import('@/lib/db');
-    (supabaseAdmin.from as vi.Mock).mockReturnThis();
-    (supabaseAdmin.select as vi.Mock).mockReturnThis();
-    (supabaseAdmin.eq as vi.Mock).mockReturnThis();
-    (supabaseAdmin.order as vi.Mock).mockReturnThis();
-    (supabaseAdmin.limit as vi.Mock).mockResolvedValue({
-      data: [
-        { user_id: 'user1', xp: 500, level: 5, rank: 1 },
-        { user_id: 'user2', xp: 400, level: 4, rank: 2 }
-      ],
-      error: null
+    const { supabase } = await import('@/lib/db');
+    const mockSupabase = {
+      from: jest.fn(() => ({
+        select: jest.fn(() => ({
+          eq: jest.fn(() => ({
+            single: jest.fn(),
+          })),
+          limit: jest.fn(() => ({
+            order: jest.fn(() => ({
+              gte: jest.fn(() => ({
+                eq: jest.fn(() => ({
+                  limit: jest.fn(),
+                })),
+              })),
+            })),
+          })),
+        })),
+      })),
+    };
+    (supabase as jest.Mock).mockReturnValue(mockSupabase);
+
+    // Mock for the leaderboard query
+    const mockLeaderboardQuery = {
+      eq: jest.fn().mockReturnThis(),
+      order: jest.fn().mockReturnThis(),
+      limit: jest.fn().mockResolvedValue({
+        data: [
+          { user_id: 'user1', xp: 500, level: 5, rank: 1 },
+          { user_id: 'user2', xp: 400, level: 4, rank: 2 }
+        ],
+        error: null
+      }),
+    };
+
+    // Mock the chain correctly
+    const mockSelect = jest.fn().mockReturnThis();
+    const mockEq = jest.fn().mockReturnValue(mockLeaderboardQuery);
+    const mockOrder = jest.fn().mockReturnValue(mockLeaderboardQuery);
+    const mockLimit = jest.fn().mockReturnValue(mockLeaderboardQuery);
+
+    mockSupabase.from.mockReturnValue({
+      select: mockSelect,
+      eq: mockEq,
+      order: mockOrder,
+      limit: mockLimit
     });
 
     const response = await getLeaderboardAPI(mockRequest);

@@ -25,20 +25,20 @@ export function Toast() {
   if (!notification) return null;
 
   return (
-    <div className="fixed top-4 right-4 z-50 animate-slide-in">
-      <div className="bg-white rounded-lg shadow-lg border border-gray-200 p-4 max-w-sm">
+    <div className="fixed top-4 right-4 z-toast animate-slide-in">
+      <div className="bg-dark rounded-lg shadow-lg border border-border p-4 max-w-sm">
         <div className="flex items-start">
           <div className="flex-1">
-            <h3 className="text-sm font-semibold text-gray-900">
+            <h3 className="text-sm font-semibold text-white">
               {notification.title}
             </h3>
-            <p className="mt-1 text-sm text-gray-600">
+            <p className="mt-1 text-sm text-text-muted">
               {notification.message}
             </p>
           </div>
           <button
             onClick={hideNotification}
-            className="ml-4 text-gray-400 hover:text-gray-600 transition-colors"
+            className="ml-4 text-text-muted hover:text-white transition-colors"
             aria-label="Close notification"
           >
             <svg

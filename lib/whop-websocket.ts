@@ -1,286 +1,241 @@
-/**
- * Whop WebSocket Client for Real-Time Event Processing
- * Per Documentation: 01_START HERE.MD, 03_CORE FEATURE.MD, 05_ARCHITECTURE.MD
- * 
- * This implements the real-time XP awarding system using Whop's server WebSocket API
- * with a bot user to receive chat messages and forum posts within 1-2 seconds.
- * 
- * PREREQUISITES:
- * 1. Bot user created in Whop dashboard
- * 2. WHOP_BOT_USER_ID in environment
- * 3. WHOP_BOT_TOKEN (OAuth token) in environment
- * 4. Bot user added to target communities
- */
+import { WhopServerSdk } from "@whop/api";
+import * as Sentry from "@sentry/nextjs";
 
-import WebSocket from 'ws';
-import { awardXP } from './xp-logic';
-import { createClient } from '@supabase/supabase-js';
-
-// WebSocket connection state
-let ws: WebSocket | null = null;
-let reconnectAttempts = 0;
-const MAX_RECONNECT_ATTEMPTS = 10;
-const RECONNECT_DELAY = 5000; // 5 seconds
-
-// Supabase client for database operations
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-);
-
-// Event types from Whop WebSocket
-interface WhopWebSocketEvent {
-  type: 'dmsPost' | 'forumPost' | 'reaction' | 'membership';
-  data: {
-    user_id: string;
-    experience_id: string;
-    content?: string;
-    post_id?: string;
-    message_id?: string;
-    reaction_type?: string;
-    timestamp: string;
-  };
+export interface WebSocketConfig {
+  agentUserId: string;
+  apiKey: string;
+  appId: string;
+  onMessage: (message: any) => Promise<void>;
+  onError?: (error: any) => void;
 }
 
-/**
- * Initialize WebSocket connection to Whop
- * Connects using bot user token for authentication
- */
-export function initializeWhopWebSocket() {
-  const botToken = process.env.WHOP_BOT_TOKEN;
-  const botUserId = process.env.WHOP_BOT_USER_ID;
+export class WhopWebSocketClient {
+  private websocket: any;
+  private isConnected: boolean = false;
+  private reconnectAttempts: number = 0;
+  private maxReconnectAttempts: number = 10;
+  private reconnectDelay: number = 2000; // Start with 2 seconds
+  private reconnectTimer: NodeJS.Timeout | null = null;
 
-  if (!botToken || !botUserId) {
-    console.error('❌ WHOP_BOT_TOKEN or WHOP_BOT_USER_ID not configured');
-    console.error('📝 Please follow UNDERSTANDING_BOTUSER.MD to set up bot user');
-    return;
+  constructor(private config: WebSocketConfig) {
+    this.validateConfig();
   }
 
-  try {
-    // Connect to Whop WebSocket API
-    // URL format: wss://ws.whop.com/v5
-    ws = new WebSocket('wss://ws.whop.com/v5', {
-      headers: {
-        'Authorization': `Bearer ${botToken}`,
-        'User-Agent': 'WEE5-Bot/1.0',
-      },
-    });
+  /**
+   * Validate configuration
+   */
+  private validateConfig(): void {
+    const { agentUserId, apiKey, appId } = this.config;
 
-    ws.on('open', handleWebSocketOpen);
-    ws.on('message', handleWebSocketMessage);
-    ws.on('error', handleWebSocketError);
-    ws.on('close', handleWebSocketClose);
-
-    console.log('🔌 Connecting to Whop WebSocket...');
-  } catch (error) {
-    console.error('❌ Failed to initialize WebSocket:', error);
-  }
-}
-
-/**
- * Handle WebSocket connection open
- */
-function handleWebSocketOpen() {
-  console.log('✅ Connected to Whop WebSocket');
-  reconnectAttempts = 0;
-
-  // Subscribe to community events
-  if (ws) {
-    ws.send(JSON.stringify({
-      action: 'subscribe',
-      feed: 'community_events',
-      types: ['dmsPost', 'forumPost', 'reaction'],
-    }));
-    console.log('📡 Subscribed to community events');
-  }
-}
-
-/**
- * Handle incoming WebSocket messages
- * Processes events and awards XP in real-time
- */
-async function handleWebSocketMessage(data: WebSocket.Data) {
-  try {
-    const event: WhopWebSocketEvent = JSON.parse(data.toString());
-    
-    console.log('📨 Received event:', event.type);
-
-    // Process event based on type
-    switch (event.type) {
-      case 'dmsPost':
-        await handleChatMessage(event);
-        break;
-      case 'forumPost':
-        await handleForumPost(event);
-        break;
-      case 'reaction':
-        await handleReaction(event);
-        break;
-      default:
-        console.log('ℹ️ Unhandled event type:', event.type);
+    if (!agentUserId?.startsWith('user_')) {
+      throw new Error('Invalid agent user ID format. Must start with "user_"');
     }
-  } catch (error) {
-    console.error('❌ Error processing WebSocket message:', error);
+
+    if (!apiKey) {
+      throw new Error('API key is required');
+    }
+
+    if (!appId?.startsWith('app_')) {
+      throw new Error('Invalid app ID format. Must start with "app_"');
+    }
   }
-}
 
-/**
- * Handle chat message event
- * Awards 20 XP per message (with cooldown)
- */
-async function handleChatMessage(event: WhopWebSocketEvent) {
-  const { user_id, experience_id } = event.data;
+  /**
+   * Initialize and connect to Whop WebSocket
+   */
+  async connect(): Promise<void> {
+    try {
+      console.log(`[WebSocket] Connecting as agent: ${this.config.agentUserId}...`);
 
-  try {
-    // Award XP for chat message (20 XP)
-    const result = await awardXP({
-      userId: user_id,
-      experienceId: experience_id,
-      activityType: 'message',
-    });
+      const whopApi = WhopServerSdk({
+        appApiKey: this.config.apiKey,
+        appId: this.config.appId,
+      });
 
-    if (result.success) {
-      console.log(`✅ Awarded ${result.xpAwarded} XP to ${user_id} for chat message`);
-      
-      if (result.leveledUp) {
-        console.log(`🎉 User ${user_id} leveled up to ${result.newLevel}!`);
-        // Level-up notification will be handled by the reward system
+      // Create WebSocket client for the agent user
+      // IMPORTANT: The agent user receives events from communities where the app is installed
+      this.websocket = whopApi
+        .withUser(this.config.agentUserId)
+        .websockets.client();
+
+      // Set up event handlers BEFORE connecting
+      this.setupEventHandlers();
+
+      // Connect to WebSocket
+      await this.websocket.connect();
+
+      console.log("[WebSocket] Connection initiated");
+
+    } catch (error) {
+      console.error("[WebSocket] Connection error:", error);
+      this.handleError(error);
+      this.scheduleReconnect();
+    }
+  }
+
+  /**
+   * Set up WebSocket event handlers
+   */
+  private setupEventHandlers(): void {
+    // Connection opened
+    this.websocket.on("connect", () => {
+      console.log("✅ [WebSocket] Connected successfully!");
+      this.isConnected = true;
+      this.reconnectAttempts = 0;
+
+      // Clear any pending reconnect timer
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
       }
-    } else {
-      console.log(`⏳ User ${user_id} on cooldown, skipping XP award`);
-    }
-  } catch (error) {
-    console.error('❌ Error awarding XP for chat message:', error);
-  }
-}
-
-/**
- * Handle forum post event
- * Awards 15-25 XP per post (randomized, with cooldown)
- */
-async function handleForumPost(event: WhopWebSocketEvent) {
-  const { user_id, experience_id } = event.data;
-
-  try {
-    // Award XP for forum post (15-25 XP, randomized)
-    const result = await awardXP({
-      userId: user_id,
-      experienceId: experience_id,
-      activityType: 'post',
     });
 
-    if (result.success) {
-      console.log(`✅ Awarded ${result.xpAwarded} XP to ${user_id} for forum post`);
-      
-      if (result.leveledUp) {
-        console.log(`🎉 User ${user_id} leveled up to ${result.newLevel}!`);
-      }
-    } else {
-      console.log(`⏳ User ${user_id} on cooldown, skipping XP award`);
-    }
-  } catch (error) {
-    console.error('❌ Error awarding XP for forum post:', error);
-  }
-}
-
-/**
- * Handle reaction event
- * Awards 5 XP per reaction (with cooldown)
- */
-async function handleReaction(event: WhopWebSocketEvent) {
-  const { user_id, experience_id } = event.data;
-
-  try {
-    // Award XP for reaction (5 XP)
-    const result = await awardXP({
-      userId: user_id,
-      experienceId: experience_id,
-      activityType: 'reaction',
+    // Connection closed
+    this.websocket.on("disconnect", () => {
+      console.log("❌ [WebSocket] Disconnected");
+      this.isConnected = false;
+      this.scheduleReconnect();
     });
 
-    if (result.success) {
-      console.log(`✅ Awarded ${result.xpAwarded} XP to ${user_id} for reaction`);
-      
-      if (result.leveledUp) {
-        console.log(`🎉 User ${user_id} leveled up to ${result.newLevel}!`);
+    // Connection status changes
+    this.websocket.on("connectionStatus", (status: string) => {
+      console.log(`[WebSocket] Status: ${status}`);
+      this.isConnected = status === "connected";
+    });
+
+    // Message received (THIS IS WHERE ACTIVITY EVENTS COME IN)
+    this.websocket.on("message", async (message: any) => {
+      try {
+        const hasChat = !!message.feedEntity?.dmsPost;
+        const hasForum = !!message.feedEntity?.forumPost;
+
+        if (!hasChat && !hasForum) {
+          console.log("[WebSocket] Received non-activity message, skipping");
+          return;
+        }
+
+        console.log("[WebSocket] Received activity event:", {
+          type: hasChat ? "chat" : "forum",
+          timestamp: new Date().toISOString(),
+        });
+
+        // Process the message asynchronously
+        await this.config.onMessage(message);
+
+      } catch (error) {
+        console.error("[WebSocket] Message processing error:", error);
+        this.handleError(error);
       }
-    } else {
-      console.log(`⏳ User ${user_id} on cooldown, skipping XP award`);
-    }
-  } catch (error) {
-    console.error('❌ Error awarding XP for reaction:', error);
+    });
+
+    // Error handling
+    this.websocket.on("error", (error: any) => {
+      console.error("[WebSocket] Connection error:", error);
+      this.handleError(error);
+    });
   }
-}
 
-/**
- * Handle WebSocket errors
- */
-function handleWebSocketError(error: Error) {
-  console.error('❌ WebSocket error:', error);
-}
+  /**
+   * Handle reconnection with exponential backoff
+   */
+  private scheduleReconnect(): void {
+    // Clear any existing timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+    }
 
-/**
- * Handle WebSocket connection close
- * Implements automatic reconnection with exponential backoff
- */
-function handleWebSocketClose(code: number, reason: string) {
-  console.log(`🔌 WebSocket closed: ${code} - ${reason}`);
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      const error = new Error(`WebSocket failed after ${this.maxReconnectAttempts} attempts`);
+      console.error("[WebSocket] Max reconnection attempts reached");
+      this.handleError(error);
+      return;
+    }
 
-  // Attempt to reconnect
-  if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-    reconnectAttempts++;
-    const delay = RECONNECT_DELAY * Math.pow(2, reconnectAttempts - 1);
-    
-    console.log(`🔄 Reconnecting in ${delay / 1000}s (attempt ${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-    
-    setTimeout(() => {
-      initializeWhopWebSocket();
+    this.reconnectAttempts++;
+
+    // Exponential backoff: 2s, 4s, 8s, 16s, 32s, max 60s
+    const delay = Math.min(
+      this.reconnectDelay * Math.pow(2, this.reconnectAttempts - 1),
+      60000
+    );
+
+    console.log(
+      `[WebSocket] Reconnecting in ${delay / 1000}s ` +
+      `(attempt ${this.reconnectAttempts}/${this.maxReconnectAttempts})...`
+    );
+
+    this.reconnectTimer = setTimeout(() => {
+      this.connect();
     }, delay);
-  } else {
-    console.error('❌ Max reconnection attempts reached. Please restart the service.');
+  }
+
+  /**
+   * Handle errors
+   */
+  private handleError(error: any): void {
+    // Call custom error handler if provided
+    if (this.config.onError) {
+      this.config.onError(error);
+    }
+
+    // Report to Sentry
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      Sentry.captureException(error, {
+        tags: {
+          service: 'websocket',
+          agentUserId: this.config.agentUserId,
+        },
+        contexts: {
+          websocket: {
+            connected: this.isConnected,
+            reconnectAttempts: this.reconnectAttempts,
+          },
+        },
+      });
+    }
+  }
+
+  /**
+   * Gracefully disconnect
+   */
+  async disconnect(): Promise<void> {
+    console.log("[WebSocket] Disconnecting...");
+
+    // Clear reconnect timer
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+
+    // Disconnect websocket
+    if (this.websocket && this.isConnected) {
+      try {
+        await this.websocket.disconnect();
+      } catch (error) {
+        console.error("[WebSocket] Error during disconnect:", error);
+      }
+    }
+
+    this.isConnected = false;
+    this.reconnectAttempts = 0;
+    console.log("[WebSocket] Disconnected");
+  }
+
+  /**
+   * Check connection status
+   */
+  isActive(): boolean {
+    return this.isConnected;
+  }
+
+  /**
+   * Get connection stats
+   */
+  getStats() {
+    return {
+      connected: this.isConnected,
+      reconnectAttempts: this.reconnectAttempts,
+      agentUserId: this.config.agentUserId,
+    };
   }
 }
-
-/**
- * Close WebSocket connection gracefully
- */
-export function closeWhopWebSocket() {
-  if (ws) {
-    ws.close();
-    ws = null;
-    console.log('🔌 WebSocket connection closed');
-  }
-}
-
-/**
- * Get WebSocket connection status
- */
-export function getWebSocketStatus(): 'connected' | 'connecting' | 'disconnected' {
-  if (!ws) return 'disconnected';
-  
-  switch (ws.readyState) {
-    case WebSocket.OPEN:
-      return 'connected';
-    case WebSocket.CONNECTING:
-      return 'connecting';
-    default:
-      return 'disconnected';
-  }
-}
-
-// Auto-initialize on module load (server-side only)
-if (typeof window === 'undefined') {
-  // Only initialize if bot credentials are configured
-  if (process.env.WHOP_BOT_TOKEN && process.env.WHOP_BOT_USER_ID) {
-    initializeWhopWebSocket();
-  } else {
-    console.warn('⚠️ Whop WebSocket not initialized: Bot credentials missing');
-    console.warn('📝 Set WHOP_BOT_TOKEN and WHOP_BOT_USER_ID to enable real-time features');
-  }
-}
-
-export default {
-  initialize: initializeWhopWebSocket,
-  close: closeWhopWebSocket,
-  getStatus: getWebSocketStatus,
-};

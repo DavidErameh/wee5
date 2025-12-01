@@ -1,103 +1,160 @@
-// services/realtime-service.ts
-// This service manages the real-time functionality for WEE5
-
-import { getWhopWebSocketClient } from '@/lib/whop-websocket';
-import { getReactionPoller } from '@/lib/reaction-poller';
+import { WhopWebSocketClient } from "@/lib/whop-websocket";
+import { processWebSocketEvent } from "@/lib/event-processor";
+import * as Sentry from "@sentry/nextjs";
 
 class RealtimeService {
-  private static instance: RealtimeService;
-  private isInitialized = false;
-  
-  private constructor() {}
-
-  public static getInstance(): RealtimeService {
-    if (!RealtimeService.instance) {
-      RealtimeService.instance = new RealtimeService();
-    }
-    return RealtimeService.instance;
-  }
+  private websocketClient: WhopWebSocketClient | null = null;
+  private isInitialized: boolean = false;
+  private startTime: number = 0;
 
   /**
-   * Initialize all real-time services
-   * @param botUserId The user ID of the bot that will receive events
+   * Initialize the real-time service
    */
-  async initialize(botUserId: string): Promise<void> {
+  async initialize(): Promise<void> {
     if (this.isInitialized) {
-      console.log('RealtimeService is already initialized');
+      console.log("[Realtime Service] Already initialized");
       return;
     }
 
-    console.log('Initializing real-time services...');
-    
     try {
-      // Initialize the Whop WebSocket client
-      const websocketClient = getWhopWebSocketClient(botUserId);
-      await websocketClient.initialize();
-      
-      // Initialize the reaction polling service
-      if (process.env.ENABLE_REACTION_POLLING === 'true') {
-        const reactionPoller = getReactionPoller();
-        reactionPoller.start();
-      } else {
-        console.log('Reaction polling is disabled (set ENABLE_REACTION_POLLING=true to enable)');
-      }
-      
+      console.log("[Realtime Service] Initializing...");
+      this.startTime = Date.now();
+
+      // Validate environment
+      this.validateEnvironment();
+
+      // Create WebSocket client with agent user
+      this.websocketClient = new WhopWebSocketClient({
+        agentUserId: process.env.WHOP_AGENT_USER_ID!,
+        apiKey: process.env.WHOP_API_KEY!,
+        appId: process.env.NEXT_PUBLIC_WHOP_APP_ID!,
+        onMessage: this.handleMessage.bind(this),
+        onError: this.handleError.bind(this),
+      });
+
+      // Connect
+      await this.websocketClient.connect();
+
       this.isInitialized = true;
-      console.log('All real-time services initialized successfully');
+
+      const duration = Date.now() - this.startTime;
+      console.log(`✅ [Realtime Service] Initialized in ${duration}ms`);
+
     } catch (error) {
-      console.error('Failed to initialize real-time services:', error);
+      console.error("❌ [Realtime Service] Initialization failed:", error);
+
+      Sentry.captureException(error, {
+        tags: { service: 'realtime-init' },
+      });
+
       throw error;
     }
   }
 
   /**
-   * Shutdown all real-time services
+   * Handle incoming WebSocket messages
    */
-  async shutdown(): Promise<void> {
-    console.log('Shutting down real-time services...');
-    
-    // Note: In a real implementation, you would properly disconnect
-    // the WebSocket client and stop the reaction poller
-    
-    this.isInitialized = false;
-    console.log('Real-time services shutdown complete');
+  private async handleMessage(message: any): Promise<void> {
+    const messageStart = Date.now();
+
+    try {
+      await processWebSocketEvent(message);
+
+      const duration = Date.now() - messageStart;
+      if (duration > 1000) {
+        console.warn(`[Realtime Service] Slow message processing: ${duration}ms`);
+      }
+    } catch (error) {
+      console.error("[Realtime Service] Message processing error:", error);
+      this.handleError(error);
+    }
   }
 
   /**
-   * Check if the service is initialized
+   * Handle errors
    */
-  isServiceInitialized(): boolean {
-    return this.isInitialized;
+  private handleError(error: any): void {
+    console.error("[Realtime Service] Error:", error);
+
+    if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+      Sentry.captureException(error, {
+        tags: {
+          service: 'realtime',
+        },
+        contexts: {
+          service: {
+            initialized: this.isInitialized,
+            uptime_ms: Date.now() - this.startTime,
+          },
+        },
+      });
+    }
+  }
+
+  /**
+   * Validate required environment variables
+   */
+  private validateEnvironment(): void {
+    const required = [
+      'WHOP_AGENT_USER_ID',
+      'WHOP_API_KEY',
+      'NEXT_PUBLIC_WHOP_APP_ID',
+      'SUPABASE_URL',
+      'SUPABASE_SERVICE_ROLE_KEY',
+      'UPSTASH_REDIS_REST_URL',
+      'UPSTASH_REDIS_REST_TOKEN',
+    ];
+
+    const missing = required.filter(key => !process.env[key]);
+
+    if (missing.length > 0) {
+      throw new Error(`Missing required environment variables: ${missing.join(', ')}`);
+    }
+
+    // Validate formats
+    if (!process.env.WHOP_AGENT_USER_ID?.startsWith('user_')) {
+      throw new Error('WHOP_AGENT_USER_ID must start with "user_"');
+    }
+
+    if (!process.env.NEXT_PUBLIC_WHOP_APP_ID?.startsWith('app_')) {
+      throw new Error('NEXT_PUBLIC_WHOP_APP_ID must start with "app_"');
+    }
+  }
+
+  /**
+   * Gracefully shut down
+   */
+  async shutdown(): Promise<void> {
+    console.log("[Realtime Service] Shutting down...");
+
+    if (this.websocketClient) {
+      await this.websocketClient.disconnect();
+    }
+
+    this.isInitialized = false;
+    const uptime = Date.now() - this.startTime;
+    console.log(`[Realtime Service] Shut down after ${uptime}ms uptime`);
+  }
+
+  /**
+   * Check if service is running
+   */
+  isActive(): boolean {
+    return this.isInitialized && (this.websocketClient?.isActive() ?? false);
+  }
+
+  /**
+   * Get service statistics
+   */
+  getStats() {
+    return {
+      initialized: this.isInitialized,
+      active: this.isActive(),
+      uptime_ms: this.isInitialized ? Date.now() - this.startTime : 0,
+      websocket: this.websocketClient?.getStats() || null,
+    };
   }
 }
 
 // Singleton instance
-export const realtimeService = RealtimeService.getInstance();
-
-// Initialize the service when this module is loaded if properly configured
-export async function initRealtimeServices(): Promise<void> {
-  const botUserId = process.env.WHOP_BOT_USER_ID;
-  
-  if (botUserId) {
-    try {
-      await realtimeService.initialize(botUserId);
-    } catch (error) {
-      console.error('Failed to initialize real-time services:', error);
-      // Don't throw here as it might break the application startup
-      // In production, you might want to handle this differently
-    }
-  } else {
-    console.warn('WHOP_BOT_USER_ID not set, real-time services will not start. Create a bot user in Whop and set this environment variable.');
-  }
-}
-
-// For server-side initialization (e.g., in a Next.js API route or server component)
-export function ensureRealtimeServicesInitialized(): void {
-  // This is a placeholder for server-side initialization logic
-  // In a real implementation, you'd need to handle server-side WebSocket management
-  // differently than client-side due to Vercel's serverless function limitations
-  console.log('Ensuring real-time services are initialized');
-}
-
-// Export for manual initialization if needed
-export { RealtimeService };
+export const realtimeService = new RealtimeService();

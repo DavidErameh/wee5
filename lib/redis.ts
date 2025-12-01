@@ -77,3 +77,31 @@ export async function getCachedLeaderboard(
     return null;
   }
 }
+
+/**
+ * Check if activity is a duplicate using Redis-based deduplication
+ * Key: `xp:dedup:{userId}:{activityId}` with 5-minute TTL 
+ */
+export async function isDuplicateActivity(userId: string, activityId: string): Promise<boolean> {
+  try {
+    const key = `xp:dedup:${userId}:${activityId}`;
+    const exists = await redis().get(key);
+    return exists !== null;
+  } catch (error) {
+    console.error('Error checking for duplicate activity:', error);
+    return false; // Fail open to not block legitimate activities
+  }
+}
+
+/**
+ * Mark activity as processed to prevent duplicates
+ * Uses 5-minute TTL to cover potential duplicate webhook deliveries
+ */
+export async function markActivityProcessed(userId: string, activityId: string): Promise<void> {
+  try {
+    const key = `xp:dedup:${userId}:${activityId}`;
+    await redis().set(key, '1', { ex: 300 }); // 5 minutes TTL
+  } catch (error) {
+    console.error('Error marking activity as processed:', error);
+  }
+}

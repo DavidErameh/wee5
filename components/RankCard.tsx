@@ -17,6 +17,7 @@ interface UserData {
   total_posts: number;
   total_reactions: number;
   last_activity_at: string;
+  xp_today?: number; // Added for T25
 }
 
 interface UserBadge {
@@ -141,17 +142,17 @@ export function RankCard({ userId, experienceId }: RankCardProps) {
 
   if (loading) {
     return (
-      <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg p-6 animate-pulse">
-        <div className="h-8 bg-white/30 rounded w-32 mb-4"></div>
-        <div className="h-4 bg-white/30 rounded w-full mb-4"></div>
-        <div className="h-16 bg-white/30 rounded"></div>
+      <div className="bg-gradient-to-r from-accent to-accent-light rounded-lg p-6 animate-pulse">
+        <div className="h-8 bg-border rounded w-32 mb-4"></div>
+        <div className="h-4 bg-border rounded w-full mb-4"></div>
+        <div className="h-16 bg-border rounded"></div>
       </div>
     );
   }
 
   if (error) {
     return (
-      <div className="bg-red-500 rounded-lg p-6 text-white">
+      <div className="bg-error rounded-lg p-6 text-white">
         <p className="font-semibold">Error</p>
         <p className="text-sm">{error}</p>
       </div>
@@ -160,7 +161,7 @@ export function RankCard({ userId, experienceId }: RankCardProps) {
 
   if (!userData) {
     return (
-      <div className="bg-gradient-to-r from-slate-500 to-slate-600 rounded-lg p-6 text-white">
+      <div className="bg-dark border border-border rounded-lg p-6 text-white">
         <h3 className="text-2xl font-bold mb-2">New Member</h3>
         <p className="text-sm opacity-90">
           Start participating to earn XP and level up!
@@ -172,7 +173,7 @@ export function RankCard({ userId, experienceId }: RankCardProps) {
   const progress = calculateProgress(userData.xp, userData.level);
 
   return (
-    <div className="bg-gradient-to-r from-blue-500 to-purple-600 rounded-lg p-6 text-white shadow-lg transform transition-transform duration-300 hover:scale-105">
+    <div className="bg-gradient-to-r from-accent to-accent-light rounded-lg p-6 text-white transform transition-all duration-300 hover:translate-y-[-2px] hover:shadow-glow">
       <div className="flex items-center justify-between mb-4">
         <div>
           <h3 className="text-3xl font-bold">Level {userData.level}</h3>
@@ -183,13 +184,16 @@ export function RankCard({ userId, experienceId }: RankCardProps) {
         <div className="text-right">
           <p className="text-xs opacity-75">Total XP</p>
           <p className="text-2xl font-bold">{userData.xp.toLocaleString()}</p>
+          {userData.xp_today !== undefined && ( // Conditionally render if xp_today is available
+            <p className="text-sm text-accent">+{userData.xp_today.toLocaleString()} today</p>
+          )}
         </div>
       </div>
 
       {/* Progress Bar */}
-      <div className="w-full bg-white/30 rounded-full h-4 overflow-hidden mb-4">
+      <div className="w-full bg-dark rounded-full h-4 overflow-hidden mb-4">
         <div
-          className="bg-white h-full transition-all duration-1000 ease-in-out"
+          className="bg-accent h-full transition-all duration-1000 ease-in-out"
           style={{ width: `${progress.percentage}%` }}
         />
       </div>
