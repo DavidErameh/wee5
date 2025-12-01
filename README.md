@@ -5,28 +5,24 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
 ## Features
 
 ### Real-Time Architecture
-- **Whop WebSocket Integration**: Direct connection to Whop's real-time event system for instant activity detection
 - **Supabase Real-Time Subscriptions**: Live UI updates via PostgreSQL real-time functionality
 - **Reaction Polling Fallback**: Backup system for platforms where reactions aren't available in real-time events
 - **Redis Cooldown Management**: Fast, distributed cooldown enforcement for spam prevention
 - **Event Processing Pipeline**: Automated validation, cooldown checking, and XP awarding
 - **Instant Rewards**: Automated milestone rewards processed within milliseconds of level-up
 - **Live Progress Tracking**: Real-time progress bars and level indicators across all UI components
-- **Auto-Reconnect**: Robust connection management with exponential backoff
 - **Real-Time Error Handling**: Comprehensive error tracking and recovery with Sentry integration
 
 ### Core Features
 - **XP System**: Earn XP for community activities
-  - Forum Posts: 15-25 XP per post (configurable for premium)
-  - Chat Messages: 20 XP per message (configurable for premium)
-  - Reactions: 5 XP per reaction (configurable for premium)
+  - Forum Posts: 15-25 XP per post (configurable for Premium)
+  - Chat Messages: 20 XP per message (configurable for Premium)
+  - Reactions: 5 XP per reaction (configurable for Premium)
 - **Leveling System**: Based on MEE6's proven formula
 - **Anti-Spam Measures**: 60-second cooldown between XP awards with Redis-powered prevention
 - **Leaderboard**: Real-time updating leaderboards with instant position changes (all-time, weekly, monthly)
 - **Rank Cards**: Live progress updates with Supabase real-time subscriptions
-- **Real-Time Processing**: Automated WebSocket-based activity detection with reaction polling fallback
-
-- **Instant XP Awarding**: XP awarded within 1-2 seconds of user activity
+- **Real-Time Processing**: Webhook-based activity detection with reaction polling fallback
 - **Live UI Updates**: Real-time progress bars and level indicators via PostgreSQL subscriptions
 - **Automated Event Processing**: Complete pipeline from activity detection to reward delivery
 
@@ -51,7 +47,7 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
 ## Installation
 
 ### Prerequisites
-- Node.js 18+ 
+- Node.js 22.4+ 
 - pnpm package manager
 - Whop Developer Account
 - Supabase account
@@ -69,7 +65,7 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
    ```env
    NEXT_PUBLIC_WHOP_APP_ID=your_app_id
    WHOP_API_KEY=your_api_key
-   WHOP_BOT_USER_ID=your_bot_user_id_that_will_receive_real_time_events
+
    WHOP_WEBHOOK_SECRET=your_webhook_secret
    SUPABASE_URL=your_supabase_url
    SUPABASE_ANON_KEY=your_supabase_anon_key
@@ -80,14 +76,36 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
    NEXT_PUBLIC_SENTRY_DSN=your_public_sentry_dsn (optional)
    ENABLE_REACTION_POLLING=true (optional, defaults to false)
    ```
-   
-   **Real-Time Setup**:
-   - Create a bot user in your Whop dashboard and obtain its user ID
-   - Set the `WHOP_BOT_USER_ID` to this user ID to enable real-time event processing
-   - The real-time services will automatically initialize when the app starts
+
 
 3. **Database Setup**:
-   Run the schema from `supabase/schema.sql` in your Supabase database to create all required tables.
+   Run the schema from `supabase/schema.sql` in your Supabase database to create all required tables, or use the migration system:
+
+   ### Database Migrations
+   WEE5 uses Supabase CLI for migration management.
+
+   #### Running Migrations
+   ```bash
+   # Apply all pending migrations
+   pnpm run migrate:up
+
+   # Check migration status
+   pnpm run migrate:status
+   ```
+
+   #### Creating New Migrations
+   ```bash
+   # Generate a new migration file (replace 'migration_name' with your descriptive name)
+   supabase migration new migration_name
+
+   # This creates a new file in supabase/migrations/ with timestamp prefix
+   ```
+
+   #### Migration Best Practices
+   - Always test migrations on local instance first
+   - Include rollback SQL in migration comments
+   - Never modify existing migrations after deployment
+   - Keep migrations small and focused on single changes
 
 4. **Start Development Server**:
    ```bash
@@ -109,7 +127,7 @@ Configure webhook URL in your Whop developer dashboard to handle membership even
 - Events: `membership.created`, `membership.updated`, `membership.canceled`, `payment.succeeded`
 
 ### Real-time Features
-WEE5 uses WebSockets for real-time activity detection. The real-time service connects to `/api/realtime` and listens for activity events.
+WEE5 uses webhooks for activity detection. Configure webhooks in your Whop dashboard to enable XP awarding.
 
 ## Usage
 
@@ -158,7 +176,7 @@ WEE5 uses WebSockets for real-time activity detection. The real-time service con
 The application uses Supabase as the primary database with these tables:
 
 - `users` - Stores user XP, level, activity data, and tier
-- `xp_configurations` - Custom XP rates for premium communities
+- `xp_configurations` - Custom XP rates for Premium communities
 - `activity_log` - Tracks all XP-earning activities
 - `rewards` - Manages earned rewards and level-ups
 - `engagement_analytics` - Daily engagement metrics (Premium feature)
@@ -169,13 +187,13 @@ The application uses Supabase as the primary database with these tables:
 - **Backend**: Next.js API routes with TypeScript
 - **Database**: Supabase (PostgreSQL) with Row Level Security and Real-Time subscriptions
 - **Caching**: Upstash Redis for cooldowns and leaderboard caching
-- **Real-time Processing**: Direct Whop WebSocket integration for event detection + reaction polling fallback
+- **Real-time Processing**: Webhook integration for event detection + reaction polling fallback
 - **Real-time UI**: Supabase PostgreSQL real-time subscriptions for live updates
 - **Authentication**: Whop SDK for user verification
 - **Monitoring**: Sentry for error tracking and performance monitoring
 - **Event Processing**: Automated pipeline from activity detection to reward delivery
 - **Cooldown Management**: Redis-powered 60-second spam prevention
-- **Connection Management**: Auto-reconnect with exponential backoff for reliability
+
 
 ## Environment Variables
 
@@ -258,18 +276,16 @@ For support, please:
 1. Check the troubleshooting section above
 2. Review the Whop developer documentation
 3. Ensure Sentry monitoring is configured to catch errors
-4. Verify that `WHOP_BOT_USER_ID` is properly set for real-time functionality
-5. Check that the bot user has access to communities where XP tracking is needed
-6. Contact support if issues persist
+4. Verify webhook configuration is correct
+5. Contact support if issues persist
 
 ## Real-Time Functionality
 
 To ensure real-time features work properly:
-1. Make sure `WHOP_BOT_USER_ID` is set to the user ID of a valid Whop user
-2. The real-time services will automatically initialize on app startup
-3. XP will be awarded within 1-2 seconds of user activities in communities
-4. Leaderboards and rank cards update in real-time via Supabase subscriptions
-5. Monitor Sentry logs for any real-time processing errors
+1. Configure webhooks in your Whop dashboard
+2. Verify webhook URL is accessible
+3. Leaderboards and rank cards update in real-time via Supabase subscriptions
+4. Monitor Sentry logs for any processing errors
 
 ## Contributing
 
