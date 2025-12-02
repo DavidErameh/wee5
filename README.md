@@ -297,4 +297,4 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 ---
 
-For more information about Whop app development, visit [Whop Developer Documentation](https://dev.whop.com/introduction)
+For more information about Whop app development, visit [Whop Developer Documentation](https://dev.whop.com/introduction)"# wee5-app" 
