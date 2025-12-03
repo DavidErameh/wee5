@@ -20,7 +20,7 @@ const nextConfig: NextConfig = {
 					},
 					{
 						key: 'X-Frame-Options',
-						value: 'DENY', // or 'SAMEORIGIN' if you need framing by same origin
+						value: 'SAMEORIGIN', // Allow embedding from same origin (required for Whop iframe integration)
 					},
 					{
 						key: 'X-XSS-Protection',

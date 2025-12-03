@@ -1,75 +1,36 @@
-import { Suspense } from 'react';
-import { AnalyticsDashboard } from '@/components/AnalyticsDashboard';
-import { UpgradeButton } from '@/components/UpgradeButton/UpgradeButton';
-import { XpConfigurationForm } from '@/components/XpConfigurationForm/XpConfigurationForm';
-import ErrorBoundary from '@/components/common/ErrorBoundary';
-import { Card, CardHeader, CardTitle, CardContent } from 'frosted-ui';
-import { SettingsForm } from '@/components/SettingsForm/SettingsForm'; // Import SettingsForm
+import { AnalyticsOverview } from "@/components/dashboard/AnalyticsOverview";
+import { XPSettings } from "@/components/dashboard/XPSettings";
+import { RewardConfig } from "@/components/dashboard/RewardConfig";
 
-export default async function DashboardPage({ 
-  params 
-}: { 
-  params: { companyId: string } 
-}) {
+interface PageProps {
+  params: Promise<{ companyId: string }>;
+}
+
+export default async function DashboardPage({ params }: PageProps) {
   const { companyId } = await params;
 
   return (
-    <div className="min-h-screen bg-black px-4 py-4 md:px-6 md:py-6">
-      <header className="mb-8">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-3xl font-bold text-white">WEE5 Dashboard</h1>
-            <p className="text-text-muted">Manage your community gamification</p>
-          </div>
-          <UpgradeButton experienceId={companyId} />
-        </div>
-      </header>
+    <div className="min-h-screen bg-black text-white p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
+        <header className="mb-8">
+          <h1 className="text-3xl font-bold text-white">Admin Dashboard</h1>
+          <p className="text-text-muted">Manage your community's gamification settings</p>
+        </header>
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-        <div className="md:col-span-12">
-          <Card>
-            <CardHeader>
-              <CardTitle>XP Configuration</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ErrorBoundary fallback={
-                <div className="h-32 bg-error/10 border border-error rounded-lg p-6 text-center">
-                  <h3 className="text-lg font-semibold text-error mb-2">Error Loading XP Configuration</h3>
-                  <p className="text-error text-sm">There was an issue loading the XP configuration.</p>
-                </div>
-              }>
-                <Suspense fallback={<div className="h-32 bg-dark-hover rounded-lg animate-pulse" />}>
-                  <XpConfigurationForm experienceId={companyId} />
-                </Suspense>
-              </ErrorBoundary>
-            </CardContent>
-          </Card>
-        </div>
+        {/* Analytics Section */}
+        <section>
+          <AnalyticsOverview />
+        </section>
 
-        <div className="md:col-span-12">
-          <Card>
-            <CardHeader>
-              <CardTitle>Analytics</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <ErrorBoundary fallback={
-                <div className="h-96 bg-error/10 border border-error rounded-lg p-6 text-center">
-                  <h3 className="text-lg font-semibold text-error mb-2">Error Loading Analytics</h3>
-                  <p className="text-error text-sm">There was an issue loading the analytics dashboard.</p>
-                </div>
-              }>
-                <Suspense fallback={<div className="h-96 bg-dark-hover rounded-lg animate-pulse" />}>
-                  <AnalyticsDashboard experienceId={companyId} />
-                </Suspense>
-              </ErrorBoundary>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
+        {/* Configuration Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
+          <section>
+            <XPSettings />
+          </section>
 
-      <div className="mt-8 grid grid-cols-1 md:grid-cols-12 gap-4">
-        <div className="md:col-span-12">
-          <SettingsForm experienceId={companyId} />
+          <section>
+            <RewardConfig />
+          </section>
         </div>
       </div>
     </div>

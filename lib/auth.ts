@@ -161,7 +161,7 @@ export async function verifyToken(token: string): Promise<{ userId: string; vali
 // Safe version of requireAuth that returns null instead of throwing
 export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
   try {
-    const headersList = headers();
+    const headersList = await headers();
     const authHeader = headersList.get('authorization');
 
     if (!authHeader?.startsWith('Bearer ')) {

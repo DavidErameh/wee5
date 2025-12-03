@@ -111,18 +111,27 @@ Then connect the GitHub repo in Vercel Dashboard:
 
 ---
 
-### Step 6: Run Database Migrations
+### Step 6: Run Database Migrations & Setup Cron
 
 **After deployment**, run migrations on production Supabase:
 
-```bash
-# Connect to production Supabase
-supabase db push --db-url "<your-production-supabase-url>"
-```
+1. **Generate Cron Configuration SQL**:
+   ```bash
+   npx tsx scripts/generate-cron-config.ts
+   ```
+   *Copy the output SQL commands.*
 
-Or manually run migrations in Supabase dashboard:
-1. Go to Supabase Dashboard → SQL Editor
-2. Run each migration file from `supabase/migrations/` folder
+2. **Run SQL in Supabase Dashboard**:
+   - Go to Supabase Dashboard → SQL Editor
+   - Paste and run the commands from step 1
+   - This configures your API URL and Secret in the database
+
+3. **Apply Migrations**:
+   ```bash
+   # Connect to production Supabase
+   supabase db push --db-url "<your-production-supabase-url>"
+   ```
+   *This enables pg_cron and schedules the jobs.*
 
 ---
 

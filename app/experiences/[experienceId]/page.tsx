@@ -1,64 +1,48 @@
+import { Suspense } from "react";
+import { getCurrentUser } from "@/lib/auth";
+import LeaderboardTable from "@/components/LeaderboardTable/LeaderboardTable";
+import { UserRankCard } from "@/components/UserRankCard/UserRankCard";
+import { ActivityFeed } from "@/components/ActivityFeed/ActivityFeed";
 
-import { UserProfileCard } from '@/components/UserProfileCard/UserProfileCard';
-import { LeaderboardTable } from '@/components/LeaderboardTable/LeaderboardTable';
-import { Suspense } from 'react';
-import ErrorBoundary from '@/components/common/ErrorBoundary';
+interface PageProps {
+  params: Promise<{ experienceId: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
+}
 
-export default async function ExperiencePage({
-  params,
-  searchParams,
-}: {
-  params: { experienceId: string };
-  searchParams: { userId?: string };
-}) {
+export default async function ExperiencePage({ params, searchParams }: PageProps) {
   const { experienceId } = await params;
-  const userId = searchParams.userId;
+  const user = await getCurrentUser();
+
+  // In a real app, we might check if the user has access to this experience here
 
   return (
-    <div className="min-h-screen bg-black px-4 py-4 md:px-6 md:py-6">
-      <header className="mb-8">
-        <h1 className="text-4xl font-bold text-white mb-2">
-          WEE5 Leaderboard
-        </h1>
-        <p className="text-text-muted">
-          Compete with other members and climb the ranks!
-        </p>
-      </header>
+    <div className="min-h-screen bg-black text-white p-4 md:p-8">
+      <div className="max-w-7xl mx-auto space-y-8">
 
-      <div className="grid grid-cols-1 md:grid-cols-12 gap-4">
-        {userId && (
-          <section className="md:col-span-12 mb-8">
-            <h2 className="text-2xl font-semibold text-white mb-4">
-              Your Progress
-            </h2>
-            <ErrorBoundary fallback={
-              <div className="bg-error/10 border border-error rounded-lg p-6 text-center">
-                <h3 className="text-xl font-semibold text-error mb-2">Error Loading Rank Card</h3>
-                <p className="text-error">There was an issue loading your progress. Please try refreshing the page.</p>
-              </div>
-            }>
-              <Suspense fallback={<div className="animate-pulse bg-dark-hover h-48 rounded-lg"></div>}>
-                <RankCard userId={userId} experienceId={experienceId} />
-              </Suspense>
-            </ErrorBoundary>
+        {/* Top Section: User Rank Card */}
+        {user && (
+          <section>
+            <UserRankCard userId={user.userId} experienceId={experienceId} />
           </section>
         )}
 
-        <section className="md:col-span-12">
-          <h2 className="text-2xl font-semibold text-white mb-4">
-            Top Players
-          </h2>
-          <ErrorBoundary fallback={
-            <div className="bg-error/10 border border-error rounded-lg p-6 text-center">
-              <h3 className="text-xl font-semibold text-error mb-2">Error Loading Leaderboard</h3>
-              <p className="text-error">There was an issue loading the leaderboard. Please try refreshing the page.</p>
-            </div>
-          }>
-            <Suspense fallback={<div className="animate-pulse bg-dark-hover h-96 rounded-lg"></div>}>
-              <LeaderboardTable experienceId={experienceId} />
-            </Suspense>
-          </ErrorBoundary>
-        </section>
+        {/* Main Content Grid */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8 h-[800px]">
+
+          {/* Left Column: Leaderboard (Takes up 2/3 space on large screens) */}
+          <section className="lg:col-span-2 h-full min-h-[500px]">
+            <LeaderboardTable
+              experienceId={experienceId}
+              currentUserId={user?.userId}
+              className="h-full"
+            />
+          </section>
+
+          {/* Right Column: Activity Feed (Takes up 1/3 space) */}
+          <section className="h-full min-h-[500px]">
+            <ActivityFeed experienceId={experienceId} />
+          </section>
+        </div>
       </div>
     </div>
   );

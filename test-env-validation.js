@@ -71,12 +71,12 @@ if (allValid) {
 
 	if (missing.length > 0) {
 		console.error(`\n📝 Missing ${missing.length} required variable(s):`);
-		missing.forEach((v) => console.error(`   - ${v}`));
+		missing.forEach((v) => { console.error(`   - ${v}`); });
 	}
 
 	if (invalid.length > 0) {
 		console.error(`\n⚠️  ${invalid.length} variable(s) have invalid format:`);
-		invalid.forEach((v) => console.error(`   - ${v}`));
+		invalid.forEach((v) => { console.error(`   - ${v}`); });
 	}
 
 	console.error("\n💡 Fix these issues before starting the app.");

@@ -112,6 +112,28 @@ WEE5 is an advanced gamification app for Whop communities, drawing inspiration f
    pnpm dev
    ```
 
+## Accessing Your App in Development
+
+**IMPORTANT**: WEE5 is a Whop iframe app and **cannot** be accessed via direct `http://localhost:3000` with full functionality.
+
+### Recommended: Use Whop Developer Dashboard
+1. Start your dev server: `pnpm dev`
+2. Go to https://dev.whop.com/apps
+3. Find your "WEE5" app
+4. Click **"Test in Development Mode"**
+
+This creates a proxy URL that forwards to your localhost with proper authentication.
+
+### Alternative: Direct Localhost (Limited)
+You can open `http://localhost:3000` for UI testing, but:
+- ❌ Authentication won't work
+- ❌ Whop SDK calls will fail
+- ✅ You can see layout and styling
+
+**For full testing, always use the Whop proxy.**
+
+See `DEVELOPMENT_GUIDE.md` for detailed instructions.
+
 ## Configuration
 
 ### Whop Integration

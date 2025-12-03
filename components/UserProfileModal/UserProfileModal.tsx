@@ -79,7 +79,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
 
           {/* Modal */}
           <motion.div
-            className="fixed inset-0 md:top-1/2 md:left-1/2 md:transform md:-translate-x-1/2 md:-translate-y-1/2 md:w-[600px] md:h-[700px] md:max-w-[90vw] md:max-h-[90vh] overflow-y-auto z-[modal] bg-dark rounded-none md:rounded-xl border-none md:border border-border"
+            className="fixed inset-0 md:top-1/2 md:left-1/2 md:transform md:-translate-x-1/2 md:-translate-y-1/2 md:w-[600px] md:h-[700px] md:max-w-[90vw] md:max-h-[90vh] overflow-y-auto z-[modal] bg-black/80 backdrop-blur-2xl rounded-none md:rounded-2xl border-none md:border border-white/10 shadow-2xl"
             initial={{ opacity: 0, scale: 0.95, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
             exit={{ opacity: 0, scale: 0.95, y: 20 }}
@@ -125,7 +125,7 @@ export const UserProfileModal: React.FC<UserProfileModalProps> = ({
                         role="listitem"
                         tabIndex={0} // Make activity item focusable
                         aria-label={`${activity.type} activity: ${activity.content} at ${activity.timestamp}`}
-                        className="bg-dark-hover rounded-lg p-3 flex items-start gap-3 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black cursor-pointer"
+                        className="glass-panel glass-panel-hover p-3 flex items-start gap-3 focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black cursor-pointer"
                         initial={{ opacity: 0, x: -20 }}
                         animate={{ opacity: 1, x: 0 }}
                         transition={{ delay: index * 0.05 }}

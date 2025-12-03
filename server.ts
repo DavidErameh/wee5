@@ -1,5 +1,5 @@
-import { createServer } from "http";
-import { parse } from "url";
+import { createServer } from "node:http";
+import { parse } from "node:url";
 import next from "next";
 import { realtimeService } from "./services/realtime-service";
 

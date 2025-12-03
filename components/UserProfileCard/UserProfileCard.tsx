@@ -5,7 +5,7 @@ import { XPProgressBar } from '@/components/XPProgressBar/XPProgressBar';
 import { cn } from '@/lib/utils';
 import { calculateProgress } from '@/lib/xp-logic';
 
-interface RankCardProps {
+export interface UserProfileCardProps {
   /** User ID to display */
   userId: string;
   /** Experience ID context */
@@ -63,9 +63,9 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
         {/* Avatar */}
         <div className="flex-shrink-0">
           {avatarUrl ? (
-            <img 
-              src={avatarUrl} 
-              alt={displayName} 
+            <img
+              src={avatarUrl}
+              alt={displayName}
               className="w-16 h-16 rounded-full border-2 border-accent"
             />
           ) : (
@@ -74,7 +74,7 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
             </div>
           )}
         </div>
-        
+
         {/* User Info */}
         <div className="flex-1 min-w-0">
           <h3 className="text-lg font-bold text-white truncate">{displayText}</h3>
@@ -87,11 +87,11 @@ export const UserProfileCard: React.FC<UserProfileCardProps> = ({
 
       {/* XP Progress */}
       <div className="mb-4">
-        <XPProgressBar 
-          current={progress.current} 
-          max={progress.needed} 
-          size="medium" 
-          showLabel={true} 
+        <XPProgressBar
+          current={progress.current}
+          max={progress.needed}
+          size="medium"
+          showLabel={true}
         />
         <div className="flex justify-between text-xs text-text-muted mt-1">
           <span>{progress.current.toLocaleString()} XP</span>

@@ -33,8 +33,8 @@
 ---
 
 ## Phase 5: Post-Implementation Polish (MEDIUM) 🔄 IN PROGRESS
-- [ ] **[5.1]** Fetch real user profile from Whop in `app/layout.tsx`.
-- [ ] **[5.2]** Fetch dynamic community name instead of hardcoded value.
+- [x] **[5.1]** Fetch real user profile from Whop in `app/layout.tsx`.
+- [x] **[5.2]** Fetch dynamic community name instead of hardcoded value.
 - [ ] **[5.3]** Add `WHOP_AGENT_USER_ID` to `.env.example`.
 - [ ] **[5.4]** Load test with 10,000+ users.
 - [ ] **[5.5]** Configure Sentry sampling rate for production.

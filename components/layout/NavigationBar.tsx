@@ -46,7 +46,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
   };
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-sticky h-[64px] bg-black/80 backdrop-blur-md border-b border-border">
+    <header className="fixed top-0 left-0 right-0 z-sticky h-[64px] bg-black/30 backdrop-blur-xl border-b border-white/10">
       <div className="mx-auto flex h-full max-w-[1280px] items-center justify-between px-4 md:px-6">
         {/* Left Side */}
         <div className="flex items-center gap-4">
@@ -68,7 +68,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
               value={searchTerm}
               onChange={(e) => handleSearch(e.target.value)}
               onFocus={() => setIsSearchOpen(true)}
-              onBlur={() => setTimeout(() => setIsSearchOpen(false), 100) } // Delay to allow click on results
+              onBlur={() => setTimeout(() => setIsSearchOpen(false), 100)} // Delay to allow click on results
               className="w-full rounded-lg border border-border bg-dark px-4 py-2 text-sm text-white placeholder-text-muted focus:outline-none focus:ring-2 focus:ring-accent focus:ring-offset-2 focus:ring-offset-black"
             />
             <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center pr-3">
@@ -81,7 +81,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
                   animate={{ opacity: 1, y: 0 }}
                   exit={{ opacity: 0, y: 10 }}
                   transition={{ duration: 0.15, ease: 'easeOut' }}
-                  className="absolute left-0 right-0 mt-2 rounded-md shadow-lg bg-dark border border-border z-dropdown max-h-60 overflow-y-auto"
+                  className="absolute left-0 right-0 mt-2 shadow-lg glass-panel z-dropdown max-h-60 overflow-y-auto"
                   role="listbox"
                 >
                   {searchResults.map((user) => (
@@ -112,7 +112,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
 
           {/* Avatar Dropdown */}
           <div className="relative">
-            <motion.button 
+            <motion.button
               className="h-10 w-10 rounded-full bg-dark ring-2 ring-offset-2 ring-offset-black ring-border hover:ring-accent transition-all focus:outline-none focus:ring-2 focus:ring-accent"
               aria-label="User menu"
               onClick={() => setIsDropdownOpen(!isDropdownOpen)}
@@ -133,7 +133,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.95, y: -10 }}
                   transition={{ duration: 0.15, ease: 'easeOut' }}
-                  className="absolute right-0 mt-2 w-48 rounded-md shadow-lg bg-dark border border-border z-dropdown origin-top-right"
+                  className="absolute right-0 mt-2 w-48 shadow-lg glass-panel z-dropdown origin-top-right"
                   role="menu"
                   aria-orientation="vertical"
                   aria-labelledby="user-menu-button"
@@ -166,7 +166,7 @@ export const NavigationBar: React.FC<NavigationBarProps> = ({
           </div>
         </div>
       </div>
-      
+
       {/* Mobile Menu Overlay would be implemented here */}
     </header>
   );

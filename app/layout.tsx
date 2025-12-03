@@ -1,5 +1,5 @@
 import { Providers } from "@/components/Providers";
-import { NavigationBar } from "@/components/layout/NavigationBar";
+import { NavbarWrapper } from "@/components/layout/NavbarWrapper";
 import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -75,7 +75,7 @@ export default async function RootLayout({
 					Skip to main content
 				</a>
 				<Providers>
-					<NavigationBar
+					<NavbarWrapper
 						communityName={communityName}
 						userName={userName}
 						currentXp={currentXp}
