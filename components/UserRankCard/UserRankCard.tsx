@@ -97,13 +97,13 @@ export function UserRankCard({ userId, experienceId }: RankCardProps) {
 
     if (loading) {
         return (
-            <div className="w-full h-64 rounded-3xl bg-white/5 border border-white/10 animate-pulse backdrop-blur-md" />
+            <div className="w-full h-64 glass-panel animate-pulse" />
         );
     }
 
     if (!userData) {
         return (
-            <div className="w-full p-8 rounded-3xl bg-white/5 border border-white/10 backdrop-blur-md text-center">
+            <div className="w-full p-8 glass-panel text-center">
                 <Trophy className="w-12 h-12 text-white/20 mx-auto mb-4" />
                 <h3 className="text-xl font-bold text-white mb-2">Start Your Journey</h3>
                 <p className="text-text-muted">Participate in the community to earn XP and unlock rewards!</p>
